@@ -1,0 +1,10 @@
+{
+  "ph_score": 25,
+  "nitrogen_score": 15,
+  "phosphorus_score": 10,
+  "potassium_score": 10,
+  "drainage_score": 15,
+  "irrigation_score": 10,
+  "slope_score": 10,
+  "soil_texture_score": 5
+}
