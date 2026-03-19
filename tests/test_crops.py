@@ -3,7 +3,8 @@ def test_create_crop(client, sample_crop_data):
     response = client.post("/api/v1/crops/", json=sample_crop_data)
     assert response.status_code == 201
     data = response.json()
-    assert data["name"] == "Wheat"
+    assert data["crop_name"] == "Wheat"
+    assert data["water_requirement_level"] == "medium"
     assert "id" in data
 
 
@@ -20,6 +21,7 @@ def test_get_crop(client, created_crop):
     response = client.get(f"/api/v1/crops/{crop_id}")
     assert response.status_code == 200
     assert response.json()["id"] == crop_id
+    assert response.json()["crop_name"] == created_crop["crop_name"]
 
 
 def test_get_crop_not_found(client):

@@ -1,177 +1,196 @@
-import pytest
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+
 from app.engines.suitability_engine import (
     calculate_suitability,
-    score_ph,
-    score_nutrient,
-    score_drainage,
-    score_irrigation,
-    score_slope,
-    score_soil_texture,
+    normalize_total_score,
+    score_drainage_compatibility,
+    score_ph_compatibility,
+    score_slope_compatibility,
+    score_soil_compatibility,
+    score_water_availability,
 )
+from app.engines.scoring_config import load_scoring_config
+
+
+CONFIG = load_scoring_config()
 
 
 def make_crop(**kwargs):
-    """Factory for creating a mock CropProfile object with sensible wheat defaults."""
-    crop = MagicMock()
-    crop.id = 1
-    crop.name = "Wheat"
-    crop.min_ph = 5.5
-    crop.max_ph = 7.5
-    crop.optimal_ph_min = 6.0
-    crop.optimal_ph_max = 7.0
-    crop.min_nitrogen_ppm = 30.0
-    crop.min_phosphorus_ppm = 20.0
-    crop.min_potassium_ppm = 150.0
-    crop.water_requirement = "medium"
-    crop.drainage_requirement = "good"
-    crop.preferred_soil_textures = "loamy,silty"
-    crop.min_area_hectares = 1.0
-    crop.max_slope_percent = 10.0
-    for k, v in kwargs.items():
-        setattr(crop, k, v)
-    return crop
+    """Create a lightweight crop profile test double with sensible defaults."""
+
+    values = {
+        "id": 1,
+        "crop_name": "Wheat",
+        "ideal_ph_min": 6.0,
+        "ideal_ph_max": 7.0,
+        "tolerable_ph_min": 5.5,
+        "tolerable_ph_max": 7.5,
+        "water_requirement_level": "medium",
+        "drainage_requirement": "good",
+        "salinity_tolerance": "moderate",
+        "rooting_depth_cm": 100.0,
+        "slope_tolerance": 10.0,
+        "organic_matter_preference": "moderate",
+    }
+    values.update(kwargs)
+    return SimpleNamespace(**values)
 
 
 def make_field(**kwargs):
-    """Factory for creating a mock Field object with sensible defaults."""
-    field = MagicMock()
-    field.id = 1
-    field.name = "Test"
-    field.area_hectares = 10.0
-    field.irrigation_available = True
-    field.drainage_quality = "good"
-    field.slope_percent = 3.0
-    for k, v in kwargs.items():
-        setattr(field, k, v)
-    return field
+    """Create a lightweight field test double with sensible defaults."""
+
+    values = {
+        "id": 1,
+        "name": "North Parcel",
+        "irrigation_available": True,
+        "drainage_quality": "good",
+        "slope_percent": 3.0,
+    }
+    values.update(kwargs)
+    return SimpleNamespace(**values)
 
 
 def make_soil(**kwargs):
-    """Factory for creating a mock SoilTest object with adequate nutrient defaults."""
-    soil = MagicMock()
-    soil.ph_level = 6.5
-    soil.nitrogen_ppm = 45.0
-    soil.phosphorus_ppm = 30.0
-    soil.potassium_ppm = 200.0
-    soil.soil_texture = "loamy"
-    for k, v in kwargs.items():
-        setattr(soil, k, v)
-    return soil
+    """Create a lightweight soil test double with sensible defaults."""
+
+    values = {
+        "id": 1,
+        "ph": 6.5,
+        "organic_matter_percent": 4.0,
+        "depth_cm": 120.0,
+        "ec": 1.5,
+    }
+    values.update(kwargs)
+    return SimpleNamespace(**values)
 
 
-def test_score_ph_optimal():
-    """Test that a pH within the optimal range returns the full weight."""
-    crop = make_crop()
-    assert score_ph(6.5, crop, 25) == 25.0
+def test_calculate_suitability_ideal_case_returns_high_score_with_positive_reasons():
+    """Ideal field, soil, and crop inputs should produce a strong suitability score."""
+
+    result = calculate_suitability(make_field(), make_crop(), make_soil())
+
+    assert 80 <= result.total_score <= 100
+    assert result.soil_test_id == 1
+    assert not result.blockers
+    assert "pH is within ideal range." in result.reasons
+    assert "Field has irrigation available." in result.reasons
+    assert result.score_breakdown["soil_compatibility"].awarded_points > 0
 
 
-def test_score_ph_acceptable():
-    """Test that a pH in the acceptable (non-optimal) range returns 60% of the weight."""
-    crop = make_crop()
-    assert score_ph(5.8, crop, 25) == pytest.approx(15.0)
+def test_no_irrigation_for_high_water_crop_returns_blocker_and_zero_score():
+    """A high water-demand crop without irrigation should be blocked."""
 
+    result = calculate_suitability(
+        make_field(irrigation_available=False),
+        make_crop(water_requirement_level="high"),
+        make_soil(),
+    )
 
-def test_score_ph_outside():
-    """Test that a pH outside the acceptable range returns zero."""
-    crop = make_crop()
-    assert score_ph(4.0, crop, 25) == 0.0
-
-
-def test_score_nutrient_full():
-    """Test that a nutrient level at or above the minimum returns the full weight."""
-    assert score_nutrient(50.0, 30.0, 15) == 15.0
-
-
-def test_score_nutrient_proportional():
-    """Test that a nutrient level below the minimum returns a proportional score."""
-    assert score_nutrient(15.0, 30.0, 15) == pytest.approx(7.5)
-
-
-def test_score_nutrient_zero_minimum():
-    """Test that when the minimum requirement is zero, the full weight is always returned."""
-    assert score_nutrient(0.0, 0.0, 10) == 10.0
-
-
-def test_score_drainage_sufficient():
-    """Test that drainage equal to or better than required returns the full weight."""
-    assert score_drainage("good", "moderate", 15) == 15.0
-
-
-def test_score_drainage_insufficient():
-    """Test that drainage worse than required returns a partial score greater than zero."""
-    result = score_drainage("poor", "good", 15)
-    assert result < 15.0
-    assert result > 0.0
-
-
-def test_score_irrigation_available():
-    """Test that irrigation available always yields the full weight regardless of crop requirement."""
-    assert score_irrigation(True, "high", 10) == 10.0
-
-
-def test_score_irrigation_low_requirement():
-    """Test that a low water-requirement crop scores full points even without irrigation."""
-    assert score_irrigation(False, "low", 10) == 10.0
-
-
-def test_score_irrigation_no_irrigation_high():
-    """Test that no irrigation combined with a high water requirement returns zero."""
-    assert score_irrigation(False, "high", 10) == 0.0
-
-
-def test_score_slope_within():
-    """Test that a slope within the crop maximum returns the full weight."""
-    assert score_slope(3.0, 10.0, 10) == 10.0
-
-
-def test_score_slope_over():
-    """Test that a slope slightly above the maximum returns a partial score."""
-    result = score_slope(12.0, 10.0, 10)
-    assert 0.0 < result < 10.0
-
-
-def test_score_slope_double():
-    """Test that a slope at double the maximum returns zero."""
-    assert score_slope(20.0, 10.0, 10) == 0.0
-
-
-def test_score_soil_texture_match():
-    """Test that a matching soil texture returns the full weight."""
-    assert score_soil_texture("loamy", "loamy,silty", 5) == 5.0
-
-
-def test_score_soil_texture_no_match():
-    """Test that a non-matching soil texture returns zero."""
-    assert score_soil_texture("sandy", "loamy,silty", 5) == 0.0
-
-
-def test_calculate_suitability_with_soil():
-    """Test that a field with soil data receives a positive score with all components present."""
-    field = make_field()
-    crop = make_crop()
-    soil = make_soil()
-    result = calculate_suitability(field, crop, soil)
-    assert 0 < result.total_score <= 100
-    assert "ph_score" in result.component_scores
-
-
-def test_calculate_suitability_no_soil():
-    """Test that a field without soil data gets a minimal non-zero score and zero nutrient points."""
-    field = make_field()
-    crop = make_crop()
-    result = calculate_suitability(field, crop, None)
-    assert result.total_score >= 5.0
-    assert result.component_scores["ph_score"] == 0.0
-
-
-def test_calculate_suitability_blocks_field_below_minimum_area():
-    """Test that a field smaller than the crop minimum area is marked unsuitable."""
-    field = make_field(area_hectares=0.5)
-    crop = make_crop(min_area_hectares=1.0)
-    soil = make_soil()
-    result = calculate_suitability(field, crop, soil)
     assert result.total_score == 0.0
-    assert result.blocking_constraints == [
-        "Field area 0.5 ha is below the minimum 1 ha."
-    ]
+    assert any(blocker.code == "no_irrigation_high_water_crop" for blocker in result.blockers)
+    assert "No irrigation available for a high water-demand crop." in result.reasons
+
+
+def test_ph_outside_tolerable_range_by_less_than_blocker_delta_does_not_block():
+    """A mild pH miss should score poorly without becoming a blocker."""
+
+    component = score_ph_compatibility(make_crop(), make_soil(ph=5.2), CONFIG)
+    result = calculate_suitability(make_field(), make_crop(), make_soil(ph=5.2))
+
+    assert component.awarded_points == 0.0
+    assert not any(blocker.code == "ph_far_outside_tolerable_range" for blocker in result.blockers)
+    assert "pH is outside the tolerable range." in component.reasons
+
+
+def test_ph_outside_tolerable_range_by_blocker_delta_or_more_blocks():
+    """A large pH mismatch should become a hard blocker."""
+
+    result = calculate_suitability(make_field(), make_crop(), make_soil(ph=4.9))
+
+    assert result.total_score == 0.0
+    assert any(blocker.code == "ph_far_outside_tolerable_range" for blocker in result.blockers)
+    assert "Soil pH is far outside the crop tolerable range." in result.reasons
+
+
+def test_drainage_below_requirement_yields_partial_score_and_penalty():
+    """Drainage shortfalls should reduce score and surface a penalty message."""
+
+    component = score_drainage_compatibility(
+        make_field(drainage_quality="poor"),
+        make_crop(drainage_requirement="good"),
+        CONFIG,
+    )
+    result = calculate_suitability(
+        make_field(drainage_quality="poor"),
+        make_crop(drainage_requirement="good"),
+        make_soil(),
+    )
+
+    assert 0.0 < component.awarded_points < component.max_points
+    assert any(penalty.dimension == "drainage_compatibility" for penalty in result.penalties)
+    assert "Drainage is below crop requirement." in component.reasons
+
+
+def test_shallow_soil_depth_reduces_soil_compatibility():
+    """Rooting depth mismatches should reduce the soil compatibility dimension."""
+
+    component = score_soil_compatibility(
+        make_crop(rooting_depth_cm=120.0),
+        make_soil(depth_cm=70.0),
+        CONFIG,
+    )
+
+    assert component.awarded_points < component.max_points
+    assert "Soil depth is below the crop rooting requirement." in component.reasons
+
+
+def test_high_ec_against_low_salinity_tolerance_reduces_soil_compatibility():
+    """Excess salinity should reduce the soil compatibility score for sensitive crops."""
+
+    component = score_soil_compatibility(
+        make_crop(salinity_tolerance="low"),
+        make_soil(ec=3.0),
+        CONFIG,
+    )
+
+    assert component.awarded_points < component.max_points
+    assert "Soil salinity exceeds the crop tolerance." in component.reasons
+
+
+def test_slope_above_tolerance_reduces_slope_score():
+    """Slope beyond the crop threshold should award only a partial score."""
+
+    component = score_slope_compatibility(
+        make_field(slope_percent=12.0),
+        make_crop(slope_tolerance=10.0),
+        CONFIG,
+    )
+
+    assert 0.0 < component.awarded_points < component.max_points
+    assert "Field slope exceeds the crop tolerance." in component.reasons
+
+
+def test_missing_soil_test_returns_blocker_and_zero_score():
+    """Missing soil data should hard-block the MVP suitability calculation."""
+
+    result = calculate_suitability(make_field(), make_crop(), None)
+
+    assert result.total_score == 0.0
+    assert any(blocker.code == "missing_soil_test" for blocker in result.blockers)
+    assert "No soil test available for suitability scoring." in result.reasons
+
+
+def test_score_normalization_is_clamped_to_zero_and_hundred():
+    """Normalization should never return values outside the 0-100 range."""
+
+    assert normalize_total_score(130.0, 100.0) == 100.0
+    assert normalize_total_score(-10.0, 100.0) == 0.0
+
+
+def test_water_availability_helper_reports_irrigation_reason():
+    """Water scoring should emit the canonical irrigation reason when irrigation exists."""
+
+    component = score_water_availability(make_field(irrigation_available=True), make_crop(), CONFIG)
+
+    assert component.awarded_points == component.max_points
+    assert component.reasons == ["Field has irrigation available."]

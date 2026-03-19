@@ -11,10 +11,14 @@ Create a new field.
 ```json
 {
   "name": "North Valley Farm",
-  "location": "North Valley",
+  "location_name": "North Valley",
+  "latitude": 39.7817,
+  "longitude": -89.6501,
   "area_hectares": 25.0,
   "slope_percent": 2.0,
   "irrigation_available": true,
+  "water_source_type": "well",
+  "infrastructure_score": 82,
   "drainage_quality": "excellent"
 }
 ```
@@ -40,12 +44,19 @@ Create a new soil test.
 ```json
 {
   "field_id": 1,
-  "ph_level": 6.5,
+  "sample_date": "2026-03-15T10:00:00Z",
+  "ph": 6.5,
+  "ec": 0.8,
   "nitrogen_ppm": 45.0,
   "phosphorus_ppm": 30.0,
   "potassium_ppm": 200.0,
+  "calcium_ppm": 1700.0,
+  "magnesium_ppm": 210.0,
   "organic_matter_percent": 3.5,
-  "soil_texture": "loamy"
+  "texture_class": "loamy",
+  "drainage_class": "good",
+  "depth_cm": 30.0,
+  "water_holding_capacity": 21.5
 }
 ```
 

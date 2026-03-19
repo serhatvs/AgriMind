@@ -1,10 +1,55 @@
 {
-  "ph_score": 25,
-  "nitrogen_score": 15,
-  "phosphorus_score": 10,
-  "potassium_score": 10,
-  "drainage_score": 15,
-  "irrigation_score": 10,
-  "slope_score": 10,
-  "soil_texture_score": 5
+  "dimensions": {
+    "soil_compatibility": 30,
+    "ph_compatibility": 25,
+    "drainage_compatibility": 15,
+    "water_availability_compatibility": 20,
+    "slope_compatibility": 10
+  },
+  "soil_compatibility": {
+    "subweights": {
+      "organic_matter": 0.4,
+      "rooting_depth": 0.35,
+      "salinity": 0.25
+    }
+  },
+  "thresholds": {
+    "ph_blocker_delta": 0.5,
+    "rooting_depth_partial_ratio": 0.6,
+    "slope_zero_ratio": 2.0,
+    "organic_matter_bands": {
+      "low": {
+        "ideal_min": 1.0,
+        "ideal_max": 3.0,
+        "acceptable_min": 0.5,
+        "acceptable_max": 4.0
+      },
+      "moderate": {
+        "ideal_min": 2.0,
+        "ideal_max": 5.0,
+        "acceptable_min": 1.0,
+        "acceptable_max": 6.0
+      },
+      "high": {
+        "ideal_min": 4.0,
+        "ideal_max": 8.0,
+        "acceptable_min": 2.5,
+        "acceptable_max": 10.0
+      }
+    },
+    "ec_bands": {
+      "low": {
+        "ideal_max": 1.0,
+        "acceptable_max": 2.0
+      },
+      "moderate": {
+        "ideal_max": 2.0,
+        "acceptable_max": 4.0
+      },
+      "high": {
+        "ideal_max": 4.0,
+        "acceptable_max": 8.0
+      }
+    }
+  }
 }

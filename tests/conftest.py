@@ -1,3 +1,8 @@
+import os
+
+SQLALCHEMY_DATABASE_URL = "sqlite://"
+os.environ.setdefault("DATABASE_URL", SQLALCHEMY_DATABASE_URL)
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -5,8 +10,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.main import app
-
-SQLALCHEMY_DATABASE_URL = "sqlite://"
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
@@ -45,11 +48,18 @@ def client(db):
 def sample_field_data():
     return {
         "name": "Test Field",
-        "location": "Springfield",
+        "location_name": "Springfield",
+        "latitude": 39.7817,
+        "longitude": -89.6501,
         "area_hectares": 10.0,
+        "elevation_meters": 182.0,
         "slope_percent": 3.0,
+        "aspect": "south",
         "irrigation_available": True,
+        "water_source_type": "well",
+        "infrastructure_score": 72,
         "drainage_quality": "good",
+        "notes": "Primary test parcel",
     }
 
 
@@ -57,12 +67,20 @@ def sample_field_data():
 def sample_soil_data(created_field):
     return {
         "field_id": created_field["id"],
-        "ph_level": 6.5,
+        "sample_date": "2026-03-15T10:00:00Z",
+        "ph": 6.5,
+        "ec": 0.8,
         "nitrogen_ppm": 45.0,
         "phosphorus_ppm": 30.0,
         "potassium_ppm": 200.0,
+        "calcium_ppm": 1700.0,
+        "magnesium_ppm": 210.0,
         "organic_matter_percent": 3.5,
-        "soil_texture": "loamy",
+        "texture_class": "loamy",
+        "drainage_class": "good",
+        "depth_cm": 30.0,
+        "water_holding_capacity": 21.5,
+        "notes": "Baseline sample",
     }
 
 
@@ -76,20 +94,21 @@ def created_field(client, sample_field_data):
 @pytest.fixture
 def sample_crop_data():
     return {
-        "name": "Wheat",
-        "variety": "Winter",
-        "min_ph": 5.5,
-        "max_ph": 7.5,
-        "optimal_ph_min": 6.0,
-        "optimal_ph_max": 7.0,
-        "min_nitrogen_ppm": 30.0,
-        "min_phosphorus_ppm": 20.0,
-        "min_potassium_ppm": 150.0,
-        "water_requirement": "medium",
+        "crop_name": "Wheat",
+        "scientific_name": "Triticum aestivum",
+        "ideal_ph_min": 6.0,
+        "ideal_ph_max": 7.0,
+        "tolerable_ph_min": 5.5,
+        "tolerable_ph_max": 7.5,
+        "water_requirement_level": "medium",
         "drainage_requirement": "good",
-        "preferred_soil_textures": "loamy,silty",
-        "min_area_hectares": 1.0,
-        "max_slope_percent": 10.0,
+        "frost_sensitivity": "medium",
+        "heat_sensitivity": "medium",
+        "salinity_tolerance": "low",
+        "rooting_depth_cm": 120.0,
+        "slope_tolerance": 10.0,
+        "organic_matter_preference": "moderate",
+        "notes": "Benchmark cereal profile",
     }
 
 

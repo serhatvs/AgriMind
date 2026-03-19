@@ -20,4 +20,4 @@ def get_crops(db: Session, skip: int = 0, limit: int = 100) -> list[CropProfile]
 
 
 def get_crop_by_name(db: Session, name: str) -> CropProfile | None:
-    return db.query(CropProfile).filter(CropProfile.name == name).first()
+    return db.query(CropProfile).filter(CropProfile.crop_name == name).first()
