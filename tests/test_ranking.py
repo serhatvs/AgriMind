@@ -1,4 +1,5 @@
 def test_rank_fields(client):
+    """Test that two fields are ranked correctly, with the better-suited field placed first."""
     # Create two fields
     field1 = client.post("/api/v1/fields/", json={
         "name": "Field Alpha",
@@ -69,6 +70,7 @@ def test_rank_fields(client):
 
 
 def test_rank_fields_invalid_crop(client):
+    """Test that ranking with a non-existent crop id returns a 404 response."""
     response = client.post("/api/v1/rank-fields/", json={
         "field_ids": [1],
         "crop_id": 9999,

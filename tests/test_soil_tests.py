@@ -1,4 +1,5 @@
 def test_create_soil_test(client, created_field):
+    """Test that a soil test can be created for a field and returns correct data."""
     soil_data = {
         "field_id": created_field["id"],
         "ph_level": 6.5,
@@ -16,6 +17,7 @@ def test_create_soil_test(client, created_field):
 
 
 def test_list_soil_tests(client, created_field):
+    """Test that the list endpoint returns all soil tests including newly created ones."""
     soil_data = {
         "field_id": created_field["id"],
         "ph_level": 6.0,
@@ -32,6 +34,7 @@ def test_list_soil_tests(client, created_field):
 
 
 def test_get_soil_tests_for_field(client, created_field):
+    """Test that soil tests can be retrieved filtered by a specific field id."""
     soil_data = {
         "field_id": created_field["id"],
         "ph_level": 6.5,
