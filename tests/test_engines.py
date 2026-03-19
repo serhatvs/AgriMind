@@ -38,6 +38,7 @@ def make_field(**kwargs):
     field = MagicMock()
     field.id = 1
     field.name = "Test"
+    field.area_hectares = 10.0
     field.irrigation_available = True
     field.drainage_quality = "good"
     field.slope_percent = 3.0
@@ -162,3 +163,15 @@ def test_calculate_suitability_no_soil():
     result = calculate_suitability(field, crop, None)
     assert result.total_score >= 5.0
     assert result.component_scores["ph_score"] == 0.0
+
+
+def test_calculate_suitability_blocks_field_below_minimum_area():
+    """Test that a field smaller than the crop minimum area is marked unsuitable."""
+    field = make_field(area_hectares=0.5)
+    crop = make_crop(min_area_hectares=1.0)
+    soil = make_soil()
+    result = calculate_suitability(field, crop, soil)
+    assert result.total_score == 0.0
+    assert result.blocking_constraints == [
+        "Field area 0.5 ha is below the minimum 1 ha."
+    ]

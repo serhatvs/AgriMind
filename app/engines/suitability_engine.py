@@ -27,6 +27,7 @@ class SuitabilityResult:
     crop_id: int
     total_score: float
     component_scores: dict = field(default_factory=dict)
+    blocking_constraints: list[str] = field(default_factory=list)
 
 
 def score_ph(ph_level: float, crop: CropProfile, weight: float) -> float:
@@ -76,6 +77,17 @@ def score_soil_texture(field_texture: str, preferred_textures: str, weight: floa
     return 0.0
 
 
+def check_blocking_constraints(field_obj: Field, crop: CropProfile) -> list[str]:
+    constraints: list[str] = []
+
+    if crop.min_area_hectares > 0 and field_obj.area_hectares < crop.min_area_hectares:
+        constraints.append(
+            f"Field area {field_obj.area_hectares:g} ha is below the minimum {crop.min_area_hectares:g} ha."
+        )
+
+    return constraints
+
+
 def calculate_suitability(
     field_obj: Field,
     crop: CropProfile,
@@ -120,9 +132,14 @@ def calculate_suitability(
         base_non_soil = drainage_pts + irrigation_pts + slope_pts
         total = max(base_non_soil, 5.0)
 
+    blocking_constraints = check_blocking_constraints(field_obj, crop)
+    if blocking_constraints:
+        total = 0.0
+
     return SuitabilityResult(
         field_id=field_obj.id,
         crop_id=crop.id,
         total_score=round(min(total, 100.0), 2),
         component_scores=component_scores,
+        blocking_constraints=blocking_constraints,
     )

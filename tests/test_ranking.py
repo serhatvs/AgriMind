@@ -77,3 +77,63 @@ def test_rank_fields_invalid_crop(client):
         "top_n": 5,
     })
     assert response.status_code == 404
+
+
+def test_rank_fields_penalizes_fields_below_minimum_area(client):
+    """Test that fields below the crop minimum area fall behind otherwise similar candidates."""
+    small_field = client.post("/api/v1/fields/", json={
+        "name": "Small Plot",
+        "location": "Zone C",
+        "area_hectares": 1.0,
+        "slope_percent": 2.0,
+        "irrigation_available": True,
+        "drainage_quality": "excellent",
+    }).json()
+    large_field = client.post("/api/v1/fields/", json={
+        "name": "Large Plot",
+        "location": "Zone D",
+        "area_hectares": 5.0,
+        "slope_percent": 2.0,
+        "irrigation_available": True,
+        "drainage_quality": "excellent",
+    }).json()
+
+    for field in (small_field, large_field):
+        client.post("/api/v1/soil-tests/", json={
+            "field_id": field["id"],
+            "ph_level": 6.5,
+            "nitrogen_ppm": 50.0,
+            "phosphorus_ppm": 35.0,
+            "potassium_ppm": 220.0,
+            "organic_matter_percent": 4.0,
+            "soil_texture": "loamy",
+        })
+
+    crop = client.post("/api/v1/crops/", json={
+        "name": "Blackberry",
+        "min_ph": 5.5,
+        "max_ph": 6.8,
+        "optimal_ph_min": 5.8,
+        "optimal_ph_max": 6.5,
+        "min_nitrogen_ppm": 40.0,
+        "min_phosphorus_ppm": 25.0,
+        "min_potassium_ppm": 180.0,
+        "water_requirement": "high",
+        "drainage_requirement": "good",
+        "preferred_soil_textures": "loamy,silty",
+        "min_area_hectares": 2.0,
+        "max_slope_percent": 5.0,
+    }).json()
+
+    response = client.post("/api/v1/rank-fields/", json={
+        "field_ids": [small_field["id"], large_field["id"]],
+        "crop_id": crop["id"],
+        "top_n": 5,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data[0]["field_id"] == large_field["id"]
+    assert data[1]["field_id"] == small_field["id"]
+    assert data[1]["score"] == 0.0
+    assert "below the minimum 2 ha" in data[1]["explanation"]

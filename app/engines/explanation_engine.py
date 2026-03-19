@@ -36,6 +36,9 @@ def generate_explanation(
         f"Field '{field_obj.name}' is {label} for {crop.name} (score: {result.total_score}/100)."
     ]
 
+    if result.blocking_constraints:
+        lines.append("Blocking constraints: " + "; ".join(result.blocking_constraints))
+
     strengths = []
     weaknesses = []
 
