@@ -89,6 +89,8 @@ def test_crop_profile_migration_upgrade_and_downgrade(tmp_path):
     assert "tolerable_ph_min" in upgraded_columns
     assert "water_requirement_level" in upgraded_columns
     assert "frost_sensitivity" in upgraded_columns
+    assert "optimal_temp_min_c" in upgraded_columns
+    assert "rainfall_requirement_mm" in upgraded_columns
     assert "created_at" in upgraded_columns
     assert "name" not in upgraded_columns
     assert "min_nitrogen_ppm" not in upgraded_columns
@@ -110,6 +112,11 @@ def test_crop_profile_migration_upgrade_and_downgrade(tmp_path):
                     salinity_tolerance,
                     rooting_depth_cm,
                     slope_tolerance,
+                    optimal_temp_min_c,
+                    optimal_temp_max_c,
+                    rainfall_requirement_mm,
+                    frost_tolerance_days,
+                    heat_tolerance_days,
                     organic_matter_preference,
                     notes,
                     created_at,
@@ -132,6 +139,11 @@ def test_crop_profile_migration_upgrade_and_downgrade(tmp_path):
     assert row["salinity_tolerance"] is None
     assert row["rooting_depth_cm"] is None
     assert row["slope_tolerance"] == 10.0
+    assert row["optimal_temp_min_c"] is None
+    assert row["optimal_temp_max_c"] is None
+    assert row["rainfall_requirement_mm"] is None
+    assert row["frost_tolerance_days"] is None
+    assert row["heat_tolerance_days"] is None
     assert row["organic_matter_preference"] == "moderate"
     assert row["notes"] == "Legacy variety: Winter"
     assert row["created_at"] is not None
@@ -146,3 +158,4 @@ def test_crop_profile_migration_upgrade_and_downgrade(tmp_path):
     assert "max_slope_percent" in downgraded_columns
     assert "crop_name" not in downgraded_columns
     assert "frost_sensitivity" not in downgraded_columns
+    assert "optimal_temp_min_c" not in downgraded_columns

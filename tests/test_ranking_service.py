@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from app.models.crop_price import CropPrice
 from app.models.crop_profile import CropProfile
 from app.models.enums import (
     CropDrainageRequirement,
@@ -10,7 +11,9 @@ from app.models.enums import (
     WaterRequirementLevel,
 )
 from app.models.field import Field
+from app.models.input_cost import InputCost
 from app.models.soil_test import SoilTest
+from app.models.weather_history import WeatherHistory
 from app.services.ranking_service import get_ranked_fields_response
 
 
@@ -29,7 +32,14 @@ def make_crop(**kwargs) -> CropProfile:
         "salinity_tolerance": CropPreferenceLevel.MODERATE,
         "rooting_depth_cm": 120.0,
         "slope_tolerance": 8.0,
+        "optimal_temp_min_c": 18.0,
+        "optimal_temp_max_c": 30.0,
+        "rainfall_requirement_mm": 650.0,
+        "frost_tolerance_days": 2,
+        "heat_tolerance_days": 20,
         "organic_matter_preference": CropPreferenceLevel.MODERATE,
+        "crop_price": CropPrice(price_per_ton=210.0),
+        "input_cost": InputCost(fertilizer_cost=240.0, water_cost=165.0, labor_cost=130.0),
     }
     values.update(kwargs)
     return CropProfile(**values)
@@ -66,6 +76,23 @@ def make_soil(field_id: int, **kwargs) -> SoilTest:
     return SoilTest(**values)
 
 
+def make_weather(field_id: int, **kwargs) -> WeatherHistory:
+    values = {
+        "field_id": field_id,
+        "date": datetime(2025, 12, 31, tzinfo=timezone.utc).date(),
+        "min_temp": 10.0,
+        "max_temp": 28.0,
+        "avg_temp": 20.0,
+        "rainfall_mm": 650.0,
+        "humidity": 60.0,
+        "wind_speed": 12.0,
+        "solar_radiation": 18.0,
+        "et0": 3.5,
+    }
+    values.update(kwargs)
+    return WeatherHistory(**values)
+
+
 def test_get_ranked_fields_response_ranks_all_fields_when_no_filter(db):
     crop = make_crop()
     field_a = make_field("Field Alpha", drainage_quality="excellent")
@@ -85,6 +112,8 @@ def test_get_ranked_fields_response_ranks_all_fields_when_no_filter(db):
     assert response.crop.crop_name == "Corn"
     assert len(response.ranked_results) == 2
     assert response.ranked_results[0].field_name == "Field Alpha"
+    assert response.ranked_results[0].estimated_profit is not None
+    assert response.ranked_results[0].ranking_score >= response.ranked_results[0].total_score * 0.7
     assert response.ranked_results[0].explanation.short_explanation
 
 
@@ -137,3 +166,46 @@ def test_get_ranked_fields_response_raises_when_no_fields_found(db):
 
     with pytest.raises(ValueError, match="No fields found for ranking"):
         get_ranked_fields_response(db, crop_id=crop.id)
+
+
+def test_get_ranked_fields_response_uses_climate_summary_for_ranking(db):
+    crop = make_crop()
+    field_a = make_field("Climate Alpha")
+    field_b = make_field("Climate Beta")
+    db.add_all([crop, field_a, field_b])
+    db.commit()
+
+    db.add_all([
+        make_soil(field_a.id),
+        make_soil(field_b.id),
+        make_weather(field_a.id, avg_temp=24.0, rainfall_mm=650.0, min_temp=8.0, max_temp=30.0),
+        make_weather(field_b.id, avg_temp=35.0, rainfall_mm=250.0, min_temp=-3.0, max_temp=40.0),
+    ])
+    db.commit()
+
+    response = get_ranked_fields_response(db, crop_id=crop.id)
+
+    assert [entry.field_name for entry in response.ranked_results] == ["Climate Alpha", "Climate Beta"]
+    assert "climate_compatibility" in response.ranked_results[0].breakdown
+    assert response.ranked_results[0].total_score > response.ranked_results[1].total_score
+
+
+def test_get_ranked_fields_response_uses_profitability_in_ranking_score(db):
+    crop = make_crop()
+    field_a = make_field("Profit Alpha", area_hectares=8.0)
+    field_b = make_field("Profit Beta", area_hectares=22.0)
+    db.add_all([crop, field_a, field_b])
+    db.commit()
+
+    db.add_all([
+        make_soil(field_a.id, ph=6.5, depth_cm=120.0),
+        make_soil(field_b.id, ph=6.5, depth_cm=120.0),
+        make_weather(field_a.id, avg_temp=20.0, rainfall_mm=650.0),
+        make_weather(field_b.id, avg_temp=20.0, rainfall_mm=650.0),
+    ])
+    db.commit()
+
+    response = get_ranked_fields_response(db, crop_id=crop.id)
+
+    assert response.ranked_results[0].field_name == "Profit Beta"
+    assert response.ranked_results[0].economic_score >= response.ranked_results[1].economic_score

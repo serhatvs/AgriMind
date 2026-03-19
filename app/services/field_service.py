@@ -1,9 +1,19 @@
 """Persistence operations for the field domain."""
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.field import Field
 from app.schemas.field import FieldCreate, FieldUpdate
+from app.services.errors import NotFoundError
+
+
+def _commit(db: Session) -> None:
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
 
 
 def create_field(db: Session, field_data: FieldCreate) -> Field:
@@ -11,7 +21,7 @@ def create_field(db: Session, field_data: FieldCreate) -> Field:
 
     field = Field(**field_data.model_dump())
     db.add(field)
-    db.commit()
+    _commit(db)
     db.refresh(field)
     return field
 
@@ -51,23 +61,22 @@ def update_field(db: Session, field_id: int, field_data: FieldUpdate) -> Field |
 
     field = db.query(Field).filter(Field.id == field_id).first()
     if not field:
-        return None
+        raise NotFoundError("Field not found")
 
     update_data = field_data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(field, key, value)
 
-    db.commit()
+    _commit(db)
     db.refresh(field)
     return field
 
 
-def delete_field(db: Session, field_id: int) -> bool:
+def delete_field(db: Session, field_id: int) -> None:
     """Delete a field if it exists."""
 
     field = db.query(Field).filter(Field.id == field_id).first()
     if not field:
-        return False
+        raise NotFoundError("Field not found")
     db.delete(field)
-    db.commit()
-    return True
+    _commit(db)

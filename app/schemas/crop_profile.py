@@ -6,10 +6,31 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import (
     CropDrainageRequirement,
+    ManagementNeedLevel,
     CropPreferenceLevel,
     CropSensitivityLevel,
     WaterRequirementLevel,
 )
+
+
+class GrowthStageDefinition(BaseModel):
+    """Ordered lifecycle stage definition embedded in a crop profile."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(..., min_length=1, max_length=255)
+    duration_days: int = Field(..., gt=0)
+    irrigation_need: ManagementNeedLevel
+    fertilizer_need: ManagementNeedLevel
+
+    @field_validator("name")
+    @classmethod
+    def validate_stage_name(cls, value: str) -> str:
+        """Reject blank stage names after whitespace normalization."""
+
+        if not value:
+            raise ValueError("Stage name must not be empty.")
+        return value
 
 
 class CropProfileBase(BaseModel):
@@ -68,8 +89,41 @@ class CropProfileBase(BaseModel):
         le=100,
         validation_alias=AliasChoices("slope_tolerance", "max_slope_percent"),
     )
+    optimal_temp_min_c: float | None = None
+    optimal_temp_max_c: float | None = None
+    rainfall_requirement_mm: float | None = Field(
+        default=None,
+        ge=0,
+        validation_alias=AliasChoices("rainfall_requirement_mm", "rainfall_requirement"),
+    )
+    frost_tolerance_days: int | None = Field(
+        default=None,
+        ge=0,
+        validation_alias=AliasChoices("frost_tolerance_days", "frost_tolerance"),
+    )
+    heat_tolerance_days: int | None = Field(
+        default=None,
+        ge=0,
+        validation_alias=AliasChoices("heat_tolerance_days", "heat_tolerance"),
+    )
+    target_nitrogen_ppm: float | None = Field(
+        default=None,
+        ge=0,
+        validation_alias=AliasChoices("target_nitrogen_ppm", "min_nitrogen_ppm"),
+    )
+    target_phosphorus_ppm: float | None = Field(
+        default=None,
+        ge=0,
+        validation_alias=AliasChoices("target_phosphorus_ppm", "min_phosphorus_ppm"),
+    )
+    target_potassium_ppm: float | None = Field(
+        default=None,
+        ge=0,
+        validation_alias=AliasChoices("target_potassium_ppm", "min_potassium_ppm"),
+    )
     organic_matter_preference: CropPreferenceLevel | None = None
     notes: str | None = None
+    growth_stages: list[GrowthStageDefinition] = Field(default_factory=list)
 
     @field_validator("crop_name", "scientific_name")
     @classmethod
@@ -115,6 +169,18 @@ class CropProfileBase(BaseModel):
             and self.ideal_ph_max > self.tolerable_ph_max
         ):
             raise ValueError("ideal_ph_max must be less than or equal to tolerable_ph_max.")
+        if (
+            self.optimal_temp_min_c is not None
+            and self.optimal_temp_max_c is not None
+            and self.optimal_temp_min_c > self.optimal_temp_max_c
+        ):
+            raise ValueError("optimal_temp_min_c must be less than or equal to optimal_temp_max_c.")
+        seen_stage_names: set[str] = set()
+        for stage in self.growth_stages:
+            normalized_name = stage.name.casefold()
+            if normalized_name in seen_stage_names:
+                raise ValueError("growth_stages must contain unique stage names.")
+            seen_stage_names.add(normalized_name)
         return self
 
 
@@ -183,7 +249,16 @@ class CropProfileRead(BaseModel):
     salinity_tolerance: CropPreferenceLevel | None
     rooting_depth_cm: float | None
     slope_tolerance: float | None
+    optimal_temp_min_c: float | None
+    optimal_temp_max_c: float | None
+    rainfall_requirement_mm: float | None
+    frost_tolerance_days: int | None
+    heat_tolerance_days: int | None
+    target_nitrogen_ppm: float | None
+    target_phosphorus_ppm: float | None
+    target_potassium_ppm: float | None
     organic_matter_preference: CropPreferenceLevel | None
     notes: str | None
+    growth_stages: list[GrowthStageDefinition]
     created_at: datetime
     updated_at: datetime

@@ -1,15 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+
+from app.api.service_errors import raise_http_exception_for_service_error
 from app.database import get_db
 from app.schemas.field import FieldCreate, FieldRead, FieldUpdate
+from app.schemas.management import ManagementPlanRead
 from app.services import field_service
+from app.services.errors import NotFoundError
+from app.services.management_service import (
+    MAX_PLAN_WEEKS,
+    ManagementPlanConflictError,
+    ManagementPlanNotFoundError,
+    ManagementService,
+)
 
 router = APIRouter(prefix="/fields", tags=["fields"])
 
 
 @router.post("/", response_model=FieldRead, status_code=201)
 def create_field(field_data: FieldCreate, db: Session = Depends(get_db)):
-    return field_service.create_field(db, field_data)
+    try:
+        return field_service.create_field(db, field_data)
+    except Exception as exc:
+        raise_http_exception_for_service_error(exc)
 
 
 @router.get("/", response_model=list[FieldRead])
@@ -21,20 +36,41 @@ def list_fields(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
 def get_field(field_id: int, db: Session = Depends(get_db)):
     field = field_service.get_field(db, field_id)
     if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
+        raise_http_exception_for_service_error(NotFoundError("Field not found"))
     return field
+
+
+@router.get("/{field_id}/management-plan", response_model=ManagementPlanRead)
+def get_management_plan(
+    field_id: int,
+    target_date: date | None = Query(default=None),
+    weeks: int = Query(default=8, ge=1, le=MAX_PLAN_WEEKS),
+    db: Session = Depends(get_db),
+):
+    service = ManagementService(db)
+    try:
+        return service.get_management_plan(
+            field_id,
+            target_date=target_date or date.today(),
+            weeks=weeks,
+        )
+    except ManagementPlanNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ManagementPlanConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.put("/{field_id}", response_model=FieldRead)
 def update_field(field_id: int, field_data: FieldUpdate, db: Session = Depends(get_db)):
-    field = field_service.update_field(db, field_id, field_data)
-    if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
-    return field
+    try:
+        return field_service.update_field(db, field_id, field_data)
+    except Exception as exc:
+        raise_http_exception_for_service_error(exc)
 
 
 @router.delete("/{field_id}", status_code=204)
 def delete_field(field_id: int, db: Session = Depends(get_db)):
-    deleted = field_service.delete_field(db, field_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Field not found")
+    try:
+        field_service.delete_field(db, field_id)
+    except Exception as exc:
+        raise_http_exception_for_service_error(exc)

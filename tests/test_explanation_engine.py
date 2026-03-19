@@ -7,6 +7,8 @@ from app.engines.explanation_engine import (
 )
 from app.engines.ranking_engine import rank_fields_for_crop
 from app.engines.suitability_engine import calculate_suitability
+from app.schemas.weather_history import ClimateSummary
+from app.services.economic_service import EconomicAssessment
 
 
 def make_crop(**kwargs):
@@ -52,12 +54,43 @@ def make_soil(**kwargs):
     return SimpleNamespace(**values)
 
 
+def make_climate_summary(**kwargs):
+    values = {
+        "avg_temp": 24.0,
+        "total_rainfall": 650.0,
+        "frost_days": 1,
+        "heat_days": 10,
+    }
+    values.update(kwargs)
+    return ClimateSummary(**values)
+
+
+def make_economic_assessment(**kwargs):
+    values = {
+        "estimated_revenue": 26000.0,
+        "estimated_cost": 9000.0,
+        "estimated_profit": 17000.0,
+        "reasons": ["High profit due to high yield and low cost."],
+        "strengths": ["High profit due to high yield and low cost."],
+        "weaknesses": [],
+    }
+    values.update(kwargs)
+    return EconomicAssessment(**values)
+
+
 def test_ranked_field_explanation_surfaces_positive_strengths():
     field_obj = make_field()
-    crop = make_crop()
+    crop = make_crop(
+        optimal_temp_min_c=18.0,
+        optimal_temp_max_c=30.0,
+        rainfall_requirement_mm=650.0,
+        frost_tolerance_days=2,
+        heat_tolerance_days=20,
+    )
     soil_map = {field_obj.id: make_soil()}
+    climate_map = {field_obj.id: make_climate_summary()}
 
-    ranked = rank_fields_for_crop([field_obj], crop, soil_map)
+    ranked = rank_fields_for_crop([field_obj], crop, soil_map, climate_summaries=climate_map)
     explanation = build_ranked_field_explanation(ranked.ranked_fields[0])
 
     assert "ranked highly" in explanation.short_explanation.lower()
@@ -69,10 +102,19 @@ def test_ranked_field_explanation_surfaces_positive_strengths():
 
 def test_explanation_collects_weaknesses_from_penalties():
     field_obj = make_field(drainage_quality="poor", slope_percent=15.0)
-    crop = make_crop(drainage_requirement="good", slope_tolerance=10.0)
+    crop = make_crop(
+        drainage_requirement="good",
+        slope_tolerance=10.0,
+        optimal_temp_min_c=18.0,
+        optimal_temp_max_c=30.0,
+        rainfall_requirement_mm=650.0,
+        frost_tolerance_days=2,
+        heat_tolerance_days=20,
+    )
     soil_map = {field_obj.id: make_soil()}
+    climate_map = {field_obj.id: make_climate_summary()}
 
-    ranked = rank_fields_for_crop([field_obj], crop, soil_map)
+    ranked = rank_fields_for_crop([field_obj], crop, soil_map, climate_summaries=climate_map)
     explanation = build_ranked_field_explanation(ranked.ranked_fields[0])
 
     assert "Drainage is below crop requirement." in explanation.weaknesses
@@ -83,10 +125,18 @@ def test_explanation_collects_weaknesses_from_penalties():
 
 def test_blocked_result_surfaces_risks_and_negative_short_explanation():
     field_obj = make_field(irrigation_available=False)
-    crop = make_crop(water_requirement_level="high")
+    crop = make_crop(
+        water_requirement_level="high",
+        optimal_temp_min_c=18.0,
+        optimal_temp_max_c=30.0,
+        rainfall_requirement_mm=650.0,
+        frost_tolerance_days=2,
+        heat_tolerance_days=20,
+    )
     soil_map = {field_obj.id: make_soil()}
+    climate_map = {field_obj.id: make_climate_summary()}
 
-    ranked = rank_fields_for_crop([field_obj], crop, soil_map)
+    ranked = rank_fields_for_crop([field_obj], crop, soil_map, climate_summaries=climate_map)
     explanation = build_ranked_field_explanation(ranked.ranked_fields[0])
 
     assert "No irrigation available for a high water-demand crop." in explanation.risks
@@ -107,10 +157,22 @@ def test_missing_soil_data_becomes_a_risk_without_crashing():
 
 def test_ranked_and_suitability_adapters_produce_equivalent_explanations():
     field_obj = make_field()
-    crop = make_crop()
+    crop = make_crop(
+        optimal_temp_min_c=18.0,
+        optimal_temp_max_c=30.0,
+        rainfall_requirement_mm=650.0,
+        frost_tolerance_days=2,
+        heat_tolerance_days=20,
+    )
     soil = make_soil()
-    result = calculate_suitability(field_obj, crop, soil)
-    ranked = rank_fields_for_crop([field_obj], crop, {field_obj.id: soil})
+    climate_summary = make_climate_summary()
+    result = calculate_suitability(field_obj, crop, soil, climate_summary=climate_summary)
+    ranked = rank_fields_for_crop(
+        [field_obj],
+        crop,
+        {field_obj.id: soil},
+        climate_summaries={field_obj.id: climate_summary},
+    )
 
     from_ranked = build_ranked_field_explanation(ranked.ranked_fields[0])
     from_suitability = build_suitability_explanation(result, field_obj)
@@ -128,3 +190,47 @@ def test_generate_explanation_returns_legacy_detailed_string():
     assert explanation == build_suitability_explanation(result, field_obj).detailed_explanation
     assert "Field 'North Parcel'" in explanation
     assert "Blockers:" in explanation
+
+
+def test_explanation_surfaces_climate_weaknesses_when_present():
+    field_obj = make_field()
+    crop = make_crop(
+        optimal_temp_min_c=18.0,
+        optimal_temp_max_c=30.0,
+        rainfall_requirement_mm=650.0,
+        frost_tolerance_days=2,
+        heat_tolerance_days=20,
+    )
+    soil = make_soil()
+    climate_summary = make_climate_summary(total_rainfall=250.0, frost_days=5)
+
+    result = calculate_suitability(field_obj, crop, soil, climate_summary=climate_summary)
+    explanation = build_suitability_explanation(result, field_obj)
+
+    assert "Rainfall insufficient." in explanation.weaknesses
+    assert "High frost risk detected." in explanation.weaknesses
+
+
+def test_ranked_explanation_surfaces_economic_strengths_and_weaknesses():
+    field_obj = make_field()
+    crop = make_crop()
+    ranked = rank_fields_for_crop(
+        [field_obj],
+        crop,
+        {field_obj.id: make_soil()},
+        economic_assessments={
+            field_obj.id: make_economic_assessment(
+                reasons=[
+                    "High profit due to high yield and low cost.",
+                    "Low profitability due to irrigation cost.",
+                ],
+                strengths=["High profit due to high yield and low cost."],
+                weaknesses=["Low profitability due to irrigation cost."],
+            )
+        },
+    )
+
+    explanation = build_ranked_field_explanation(ranked.ranked_fields[0])
+
+    assert "High profit due to high yield and low cost." in explanation.strengths
+    assert "Low profitability due to irrigation cost." in explanation.weaknesses

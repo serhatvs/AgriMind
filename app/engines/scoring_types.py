@@ -75,3 +75,12 @@ class SuitabilityResult:
         """Compatibility view of blocker messages."""
 
         return [blocker.message for blocker in self.blockers]
+
+    @property
+    def climate_score(self) -> float:
+        """Return the climate component normalized to a 0-100 score."""
+
+        component = self.score_breakdown.get("climate_compatibility")
+        if component is None or component.max_points <= 0:
+            return 0.0
+        return round((component.awarded_points / component.max_points) * 100, 2)

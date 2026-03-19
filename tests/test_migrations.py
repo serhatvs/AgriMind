@@ -99,3 +99,53 @@ def test_field_migration_upgrade_and_downgrade(tmp_path):
     assert "location_name" not in downgraded_columns
     assert "latitude" not in downgraded_columns
     assert "infrastructure_score" not in downgraded_columns
+
+
+def test_feedback_loop_migration_adds_closed_loop_tables(tmp_path):
+    """Head migration should add feedback tables and their key constraints."""
+
+    database_path = tmp_path / "feedback_loop_migration.sqlite"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    config = _make_alembic_config(database_url)
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    inspector = inspect(engine)
+
+    assert {
+        "recommendation_runs",
+        "recommendation_results",
+        "user_decisions",
+        "season_results",
+    }.issubset(set(inspector.get_table_names()))
+
+    recommendation_results_pk = inspector.get_pk_constraint("recommendation_results")
+    assert recommendation_results_pk["constrained_columns"] == ["recommendation_run_id", "field_id"]
+    recommendation_results_uniques = inspector.get_unique_constraints("recommendation_results")
+    assert any(
+        constraint["column_names"] == ["recommendation_run_id", "rank"]
+        for constraint in recommendation_results_uniques
+    )
+
+    user_decisions_pk = inspector.get_pk_constraint("user_decisions")
+    season_results_pk = inspector.get_pk_constraint("season_results")
+    assert user_decisions_pk["constrained_columns"] == ["recommendation_run_id"]
+    assert season_results_pk["constrained_columns"] == ["recommendation_run_id"]
+
+    recommendation_runs_fks = inspector.get_foreign_keys("recommendation_runs")
+    recommendation_results_fks = inspector.get_foreign_keys("recommendation_results")
+    user_decisions_fks = inspector.get_foreign_keys("user_decisions")
+    season_results_fks = inspector.get_foreign_keys("season_results")
+
+    assert any(fk["referred_table"] == "crop_profiles" and fk["referred_columns"] == ["id"] for fk in recommendation_runs_fks)
+    assert any(fk["referred_table"] == "recommendation_runs" for fk in recommendation_results_fks)
+    assert any(fk["referred_table"] == "fields" for fk in recommendation_results_fks)
+    assert any(fk["referred_table"] == "recommendation_runs" for fk in user_decisions_fks)
+    assert any(fk["referred_table"] == "fields" for fk in user_decisions_fks)
+    assert any(fk["referred_table"] == "recommendation_runs" for fk in season_results_fks)
+    assert any(fk["referred_table"] == "fields" for fk in season_results_fks)
+    assert any(fk["referred_table"] == "crop_profiles" for fk in season_results_fks)
+
+    season_columns = {column["name"] for column in inspector.get_columns("season_results")}
+    assert {"recommendation_run_id", "field_id", "crop_id", "yield", "actual_cost", "notes"} == season_columns

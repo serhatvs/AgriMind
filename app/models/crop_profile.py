@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from sqlalchemy import CheckConstraint, Enum, Float, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from typing import TYPE_CHECKING, Any
+
+from sqlalchemy import JSON, CheckConstraint, Enum, Float, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.models.enums import (
@@ -13,6 +15,12 @@ from app.models.enums import (
     WaterRequirementLevel,
 )
 from app.models.mixins import TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.crop_price import CropPrice
+    from app.models.field_crop_cycle import FieldCropCycle
+    from app.models.feedback import RecommendationRun, SeasonResult
+    from app.models.input_cost import InputCost
 
 
 class CropProfile(TimestampMixin, Base):
@@ -59,6 +67,34 @@ class CropProfile(TimestampMixin, Base):
         CheckConstraint(
             "slope_tolerance IS NULL OR (slope_tolerance >= 0 AND slope_tolerance <= 100)",
             name="ck_crop_profiles_slope_tolerance_range",
+        ),
+        CheckConstraint(
+            "optimal_temp_min_c IS NULL OR optimal_temp_max_c IS NULL OR optimal_temp_min_c <= optimal_temp_max_c",
+            name="ck_crop_profiles_optimal_temp_order",
+        ),
+        CheckConstraint(
+            "rainfall_requirement_mm IS NULL OR rainfall_requirement_mm >= 0",
+            name="ck_crop_profiles_rainfall_requirement_non_negative",
+        ),
+        CheckConstraint(
+            "frost_tolerance_days IS NULL OR frost_tolerance_days >= 0",
+            name="ck_crop_profiles_frost_tolerance_non_negative",
+        ),
+        CheckConstraint(
+            "heat_tolerance_days IS NULL OR heat_tolerance_days >= 0",
+            name="ck_crop_profiles_heat_tolerance_non_negative",
+        ),
+        CheckConstraint(
+            "target_nitrogen_ppm IS NULL OR target_nitrogen_ppm >= 0",
+            name="ck_crop_profiles_target_nitrogen_ppm_non_negative",
+        ),
+        CheckConstraint(
+            "target_phosphorus_ppm IS NULL OR target_phosphorus_ppm >= 0",
+            name="ck_crop_profiles_target_phosphorus_ppm_non_negative",
+        ),
+        CheckConstraint(
+            "target_potassium_ppm IS NULL OR target_potassium_ppm >= 0",
+            name="ck_crop_profiles_target_potassium_ppm_non_negative",
         ),
     )
 
@@ -116,6 +152,14 @@ class CropProfile(TimestampMixin, Base):
     )
     rooting_depth_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     slope_tolerance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    optimal_temp_min_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    optimal_temp_max_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rainfall_requirement_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frost_tolerance_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    heat_tolerance_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_nitrogen_ppm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_phosphorus_ppm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_potassium_ppm: Mapped[float | None] = mapped_column(Float, nullable=True)
     organic_matter_preference: Mapped[CropPreferenceLevel | None] = mapped_column(
         Enum(
             CropPreferenceLevel,
@@ -126,6 +170,31 @@ class CropProfile(TimestampMixin, Base):
         nullable=True,
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    growth_stages: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    crop_price: Mapped["CropPrice | None"] = relationship(
+        "CropPrice",
+        back_populates="crop",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    input_cost: Mapped["InputCost | None"] = relationship(
+        "InputCost",
+        back_populates="crop",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    recommendation_runs: Mapped[list["RecommendationRun"]] = relationship(
+        "RecommendationRun",
+        back_populates="crop",
+    )
+    season_results: Mapped[list["SeasonResult"]] = relationship(
+        "SeasonResult",
+        back_populates="crop",
+    )
+    field_crop_cycles: Mapped[list["FieldCropCycle"]] = relationship(
+        "FieldCropCycle",
+        back_populates="crop",
+    )
 
     @property
     def name(self) -> str:
@@ -165,21 +234,21 @@ class CropProfile(TimestampMixin, Base):
 
     @property
     def min_nitrogen_ppm(self) -> float:
-        """Fallback used by the legacy scoring engine when nutrient minima are absent."""
+        """Compatibility alias for persisted crop nitrogen sufficiency targets."""
 
-        return 0.0
+        return self.target_nitrogen_ppm if self.target_nitrogen_ppm is not None else 0.0
 
     @property
     def min_phosphorus_ppm(self) -> float:
-        """Fallback used by the legacy scoring engine when nutrient minima are absent."""
+        """Compatibility alias for persisted crop phosphorus sufficiency targets."""
 
-        return 0.0
+        return self.target_phosphorus_ppm if self.target_phosphorus_ppm is not None else 0.0
 
     @property
     def min_potassium_ppm(self) -> float:
-        """Fallback used by the legacy scoring engine when nutrient minima are absent."""
+        """Compatibility alias for persisted crop potassium sufficiency targets."""
 
-        return 0.0
+        return self.target_potassium_ppm if self.target_potassium_ppm is not None else 0.0
 
     @property
     def preferred_soil_textures(self) -> str:
@@ -198,3 +267,27 @@ class CropProfile(TimestampMixin, Base):
         """Compatibility alias for the prior slope tolerance field name."""
 
         return self.slope_tolerance if self.slope_tolerance is not None else 100.0
+
+    @property
+    def optimal_temp_range(self) -> tuple[float | None, float | None]:
+        """Compatibility view of the crop's optimal average temperature band."""
+
+        return (self.optimal_temp_min_c, self.optimal_temp_max_c)
+
+    @property
+    def rainfall_requirement(self) -> float | None:
+        """Compatibility alias for the crop rainfall target."""
+
+        return self.rainfall_requirement_mm
+
+    @property
+    def frost_tolerance(self) -> int | None:
+        """Compatibility alias for the crop frost-day tolerance."""
+
+        return self.frost_tolerance_days
+
+    @property
+    def heat_tolerance(self) -> int | None:
+        """Compatibility alias for the crop heat-day tolerance."""
+
+        return self.heat_tolerance_days

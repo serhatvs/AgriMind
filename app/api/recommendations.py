@@ -7,6 +7,7 @@ from app.engines.explanation_engine import generate_explanation
 from app.services.field_service import get_field
 from app.services.crop_service import get_crop
 from app.services.soil_service import get_latest_soil_test_for_field
+from app.services.weather_service import WeatherService
 
 router = APIRouter(prefix="/recommendation", tags=["recommendations"])
 
@@ -20,7 +21,8 @@ def get_recommendation(field_id: int, crop_id: int, db: Session = Depends(get_db
     if not crop:
         raise HTTPException(status_code=404, detail="Crop not found")
     soil_test = get_latest_soil_test_for_field(db, field_id)
-    result = calculate_suitability(field_obj, crop, soil_test)
+    climate_summary = WeatherService(db).get_climate_summary(field_id)
+    result = calculate_suitability(field_obj, crop, soil_test, climate_summary=climate_summary)
     explanation = generate_explanation(result, field_obj, crop)
     return RankedFieldResult(
         rank=1,

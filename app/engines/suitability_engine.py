@@ -6,14 +6,17 @@ from app.engines.suitability_engine import calculate_suitability
 from app.services.crop_service import get_crop
 from app.services.field_service import get_field
 from app.services.soil_service import get_latest_soil_test_for_field
+from app.services.weather_service import WeatherService
 
 field_obj = get_field(db, field_id)
 crop = get_crop(db, crop_id)
 soil_test = get_latest_soil_test_for_field(db, field_id)
+climate_summary = WeatherService(db).get_climate_summary(field_id)
 
-result = calculate_suitability(field_obj, crop, soil_test)
+result = calculate_suitability(field_obj, crop, soil_test, climate_summary=climate_summary)
 print(result.total_score)
 print(result.score_breakdown["ph_compatibility"].awarded_points)
+print(result.climate_score)
 print(result.reasons)
 ```
 """
@@ -23,6 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from app.engines.climate_scoring import score_climate_compatibility
 from app.engines.scoring_config import RangeBand, SalinityBand, SuitabilityScoringConfig, load_scoring_config
 from app.engines.scoring_types import (
     ScoreBlocker,
@@ -34,6 +38,7 @@ from app.engines.scoring_types import (
 from app.models.crop_profile import CropProfile
 from app.models.field import Field
 from app.models.soil_test import SoilTest
+from app.schemas.weather_history import ClimateSummary
 
 
 DRAINAGE_LEVELS = {"poor": 1, "moderate": 2, "good": 3, "excellent": 4}
@@ -77,6 +82,31 @@ def _dedupe_messages(messages: list[str]) -> list[str]:
             seen.add(message)
             ordered.append(message)
     return ordered
+
+
+def _penalty_messages(component: ScoreComponent) -> list[str]:
+    negative_markers = (
+        "outside",
+        "below",
+        "insufficient",
+        "risk",
+        "exceeds",
+        "limits",
+        "lack",
+        "unavailable",
+        "missing",
+        "not configured",
+    )
+    negative_reasons: list[str] = []
+    for reason in component.reasons:
+        normalized = reason.lower()
+        if any(marker in normalized for marker in negative_markers):
+            negative_reasons.append(reason)
+    if negative_reasons:
+        return _dedupe_messages(negative_reasons)
+    if component.reasons:
+        return [component.reasons[-1]]
+    return [f"{component.label} reduced the score."]
 
 
 def _status_from_ratio(ratio: float) -> ScoreStatus:
@@ -551,14 +581,14 @@ def build_penalties(
         points_lost = _round_points(component.max_points - component.awarded_points)
         if points_lost <= 0:
             continue
-        message = component.reasons[-1] if component.reasons else f"{component.label} reduced the score."
-        penalties.append(
-            ScorePenalty(
-                dimension=key,
-                points_lost=points_lost,
-                message=message,
+        for message in _penalty_messages(component):
+            penalties.append(
+                ScorePenalty(
+                    dimension=key,
+                    points_lost=points_lost,
+                    message=message,
+                )
             )
-        )
     return penalties
 
 
@@ -587,6 +617,7 @@ class SuitabilityScorer:
         field_obj: Field,
         crop: CropProfile,
         soil_test: SoilTest | None,
+        climate_summary: ClimateSummary | None = None,
     ) -> SuitabilityResult:
         """Score a single field for a selected crop."""
 
@@ -596,6 +627,7 @@ class SuitabilityScorer:
             "drainage_compatibility": score_drainage_compatibility(field_obj, crop, self.config),
             "water_availability_compatibility": score_water_availability(field_obj, crop, self.config),
             "slope_compatibility": score_slope_compatibility(field_obj, crop, self.config),
+            "climate_compatibility": score_climate_compatibility(crop, climate_summary, self.config),
         }
 
         blockers = evaluate_blockers(field_obj, crop, soil_test, self.config)
@@ -631,11 +663,12 @@ def calculate_suitability(
     field_obj: Field,
     crop: CropProfile,
     soil_test: SoilTest | None,
+    climate_summary: ClimateSummary | None = None,
 ) -> SuitabilityResult:
     """Compatibility wrapper around the scorer service."""
 
     scorer = SuitabilityScorer()
-    return scorer.score_field(field_obj, crop, soil_test)
+    return scorer.score_field(field_obj, crop, soil_test, climate_summary=climate_summary)
 
 
 def score_ph(ph_level: float, crop: CropProfile, weight: float) -> float:

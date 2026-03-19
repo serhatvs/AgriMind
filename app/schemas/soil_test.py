@@ -82,6 +82,10 @@ class SoilTestCreate(SoilTestBase):
     )
 
 
+class SoilTestUpdate(SoilTestBase):
+    """Schema used when partially updating an existing soil test."""
+
+
 class SoilTestRead(BaseModel):
     """Schema returned for soil test read operations."""
 

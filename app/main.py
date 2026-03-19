@@ -1,9 +1,21 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.api import agri_assistant, crop_profiles, crops, dashboards, fields, ranking, recommendations, soil_tests
 from app.config import settings
 from app.database import Base, engine
-from app.api import fields, soil_tests, crops, ranking, recommendations
+from app.models import (  # noqa: F401
+    crop_price,
+    crop_profile,
+    feedback,
+    field,
+    field_crop_cycle,
+    input_cost,
+    recommendation,
+    soil_test,
+    weather_history,
+)
 
 
 @asynccontextmanager
@@ -29,8 +41,11 @@ def create_app() -> FastAPI:
     app.include_router(fields.router, prefix=settings.API_V1_PREFIX)
     app.include_router(soil_tests.router, prefix=settings.API_V1_PREFIX)
     app.include_router(crops.router, prefix=settings.API_V1_PREFIX)
+    app.include_router(crop_profiles.router, prefix=settings.API_V1_PREFIX)
+    app.include_router(dashboards.router, prefix=settings.API_V1_PREFIX)
     app.include_router(ranking.router, prefix=settings.API_V1_PREFIX)
     app.include_router(recommendations.router, prefix=settings.API_V1_PREFIX)
+    app.include_router(agri_assistant.router, prefix=settings.API_V1_PREFIX)
 
     return app
 

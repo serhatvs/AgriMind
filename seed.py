@@ -7,24 +7,29 @@ Run:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import random
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import Base, SessionLocal, engine
+from app.models.crop_price import CropPrice
 from app.models.crop_profile import CropProfile
 from app.models.enums import (
     CropDrainageRequirement,
     CropPreferenceLevel,
     CropSensitivityLevel,
     FieldAspect,
+    ManagementNeedLevel,
     WaterRequirementLevel,
     WaterSourceType,
 )
 from app.models.field import Field
+from app.models.field_crop_cycle import FieldCropCycle
+from app.models.input_cost import InputCost
 from app.models.soil_test import SoilTest
+from app.models.weather_history import WeatherHistory
 
 
 SEED_TAG = "[agrimind-mvp-seed:v2]"
@@ -54,7 +59,20 @@ class CropSeedSpec:
     salinity_tolerance: CropPreferenceLevel
     rooting_depth_cm: float
     slope_tolerance: float
+    optimal_temp_min_c: float
+    optimal_temp_max_c: float
+    rainfall_requirement_mm: float
+    frost_tolerance_days: int
+    heat_tolerance_days: int
+    target_nitrogen_ppm: float
+    target_phosphorus_ppm: float
+    target_potassium_ppm: float
     organic_matter_preference: CropPreferenceLevel
+    growth_stages: list[dict[str, object]]
+    price_per_ton: float
+    fertilizer_cost: float
+    water_cost: float
+    labor_cost: float
     description: str
 
 
@@ -119,6 +137,14 @@ class SoilSeedSpec:
     depth_cm: float
     water_holding_capacity: float
     description: str
+
+
+@dataclass(frozen=True, slots=True)
+class CropCycleSeedSpec:
+    field_slug: str
+    crop_slug: str
+    sowing_date: date
+    current_stage: str
 
 
 FIELD_ARCHETYPES = (
@@ -287,7 +313,39 @@ def build_crop_specs() -> list[CropSeedSpec]:
             salinity_tolerance=CropPreferenceLevel.LOW,
             rooting_depth_cm=90.0,
             slope_tolerance=14.0,
+            optimal_temp_min_c=16.0,
+            optimal_temp_max_c=24.0,
+            rainfall_requirement_mm=900.0,
+            frost_tolerance_days=15,
+            heat_tolerance_days=20,
+            target_nitrogen_ppm=42.0,
+            target_phosphorus_ppm=24.0,
+            target_potassium_ppm=210.0,
             organic_matter_preference=CropPreferenceLevel.HIGH,
+            growth_stages=[
+                {
+                    "name": "budbreak",
+                    "duration_days": 14,
+                    "irrigation_need": ManagementNeedLevel.MEDIUM.value,
+                    "fertilizer_need": ManagementNeedLevel.MEDIUM.value,
+                },
+                {
+                    "name": "flowering",
+                    "duration_days": 21,
+                    "irrigation_need": ManagementNeedLevel.HIGH.value,
+                    "fertilizer_need": ManagementNeedLevel.HIGH.value,
+                },
+                {
+                    "name": "fruit_fill",
+                    "duration_days": 28,
+                    "irrigation_need": ManagementNeedLevel.HIGH.value,
+                    "fertilizer_need": ManagementNeedLevel.MEDIUM.value,
+                },
+            ],
+            price_per_ton=1850.0,
+            fertilizer_cost=320.0,
+            water_cost=240.0,
+            labor_cost=410.0,
             description="Bramble crop profile tuned to acidic, well-drained foothill sites.",
         ),
         CropSeedSpec(
@@ -305,7 +363,39 @@ def build_crop_specs() -> list[CropSeedSpec]:
             salinity_tolerance=CropPreferenceLevel.MODERATE,
             rooting_depth_cm=150.0,
             slope_tolerance=6.0,
+            optimal_temp_min_c=18.0,
+            optimal_temp_max_c=30.0,
+            rainfall_requirement_mm=650.0,
+            frost_tolerance_days=2,
+            heat_tolerance_days=25,
+            target_nitrogen_ppm=60.0,
+            target_phosphorus_ppm=28.0,
+            target_potassium_ppm=220.0,
             organic_matter_preference=CropPreferenceLevel.MODERATE,
+            growth_stages=[
+                {
+                    "name": "germination",
+                    "duration_days": 7,
+                    "irrigation_need": ManagementNeedLevel.MEDIUM.value,
+                    "fertilizer_need": ManagementNeedLevel.LOW.value,
+                },
+                {
+                    "name": "vegetative",
+                    "duration_days": 21,
+                    "irrigation_need": ManagementNeedLevel.HIGH.value,
+                    "fertilizer_need": ManagementNeedLevel.HIGH.value,
+                },
+                {
+                    "name": "reproductive",
+                    "duration_days": 18,
+                    "irrigation_need": ManagementNeedLevel.HIGH.value,
+                    "fertilizer_need": ManagementNeedLevel.MEDIUM.value,
+                },
+            ],
+            price_per_ton=210.0,
+            fertilizer_cost=240.0,
+            water_cost=165.0,
+            labor_cost=130.0,
             description="High-water grain crop profile for deeper irrigated fields.",
         ),
         CropSeedSpec(
@@ -323,7 +413,39 @@ def build_crop_specs() -> list[CropSeedSpec]:
             salinity_tolerance=CropPreferenceLevel.LOW,
             rooting_depth_cm=120.0,
             slope_tolerance=12.0,
+            optimal_temp_min_c=12.0,
+            optimal_temp_max_c=22.0,
+            rainfall_requirement_mm=450.0,
+            frost_tolerance_days=25,
+            heat_tolerance_days=18,
+            target_nitrogen_ppm=45.0,
+            target_phosphorus_ppm=20.0,
+            target_potassium_ppm=180.0,
             organic_matter_preference=CropPreferenceLevel.MODERATE,
+            growth_stages=[
+                {
+                    "name": "establishment",
+                    "duration_days": 10,
+                    "irrigation_need": ManagementNeedLevel.LOW.value,
+                    "fertilizer_need": ManagementNeedLevel.LOW.value,
+                },
+                {
+                    "name": "tillering",
+                    "duration_days": 24,
+                    "irrigation_need": ManagementNeedLevel.MEDIUM.value,
+                    "fertilizer_need": ManagementNeedLevel.HIGH.value,
+                },
+                {
+                    "name": "grain_fill",
+                    "duration_days": 18,
+                    "irrigation_need": ManagementNeedLevel.MEDIUM.value,
+                    "fertilizer_need": ManagementNeedLevel.MEDIUM.value,
+                },
+            ],
+            price_per_ton=255.0,
+            fertilizer_cost=165.0,
+            water_cost=60.0,
+            labor_cost=95.0,
             description="Benchmark cereal profile for moderately drained grain-belt soils.",
         ),
         CropSeedSpec(
@@ -341,7 +463,39 @@ def build_crop_specs() -> list[CropSeedSpec]:
             salinity_tolerance=CropPreferenceLevel.HIGH,
             rooting_depth_cm=170.0,
             slope_tolerance=14.0,
+            optimal_temp_min_c=18.0,
+            optimal_temp_max_c=30.0,
+            rainfall_requirement_mm=400.0,
+            frost_tolerance_days=3,
+            heat_tolerance_days=35,
+            target_nitrogen_ppm=36.0,
+            target_phosphorus_ppm=18.0,
+            target_potassium_ppm=190.0,
             organic_matter_preference=CropPreferenceLevel.LOW,
+            growth_stages=[
+                {
+                    "name": "emergence",
+                    "duration_days": 9,
+                    "irrigation_need": ManagementNeedLevel.LOW.value,
+                    "fertilizer_need": ManagementNeedLevel.LOW.value,
+                },
+                {
+                    "name": "vegetative",
+                    "duration_days": 20,
+                    "irrigation_need": ManagementNeedLevel.MEDIUM.value,
+                    "fertilizer_need": ManagementNeedLevel.MEDIUM.value,
+                },
+                {
+                    "name": "flowering",
+                    "duration_days": 16,
+                    "irrigation_need": ManagementNeedLevel.MEDIUM.value,
+                    "fertilizer_need": ManagementNeedLevel.HIGH.value,
+                },
+            ],
+            price_per_ton=430.0,
+            fertilizer_cost=145.0,
+            water_cost=45.0,
+            labor_cost=90.0,
             description="Drought-tolerant oilseed profile suited to lower-input parcels.",
         ),
         CropSeedSpec(
@@ -359,7 +513,39 @@ def build_crop_specs() -> list[CropSeedSpec]:
             salinity_tolerance=CropPreferenceLevel.MODERATE,
             rooting_depth_cm=110.0,
             slope_tolerance=10.0,
+            optimal_temp_min_c=16.0,
+            optimal_temp_max_c=28.0,
+            rainfall_requirement_mm=350.0,
+            frost_tolerance_days=8,
+            heat_tolerance_days=20,
+            target_nitrogen_ppm=24.0,
+            target_phosphorus_ppm=16.0,
+            target_potassium_ppm=150.0,
             organic_matter_preference=CropPreferenceLevel.MODERATE,
+            growth_stages=[
+                {
+                    "name": "emergence",
+                    "duration_days": 8,
+                    "irrigation_need": ManagementNeedLevel.LOW.value,
+                    "fertilizer_need": ManagementNeedLevel.LOW.value,
+                },
+                {
+                    "name": "branching",
+                    "duration_days": 18,
+                    "irrigation_need": ManagementNeedLevel.MEDIUM.value,
+                    "fertilizer_need": ManagementNeedLevel.MEDIUM.value,
+                },
+                {
+                    "name": "pod_fill",
+                    "duration_days": 20,
+                    "irrigation_need": ManagementNeedLevel.MEDIUM.value,
+                    "fertilizer_need": ManagementNeedLevel.HIGH.value,
+                },
+            ],
+            price_per_ton=610.0,
+            fertilizer_cost=120.0,
+            water_cost=35.0,
+            labor_cost=105.0,
             description="Pulse crop profile for neutral to slightly alkaline, well-drained soils.",
         ),
     ]
@@ -482,6 +668,43 @@ def build_soil_specs(field_specs: list[FieldSeedSpec]) -> list[SoilSeedSpec]:
     return soil_specs
 
 
+def build_crop_cycle_specs() -> list[CropCycleSeedSpec]:
+    """Return the deterministic active crop cycles used for management demos."""
+
+    return [
+        CropCycleSeedSpec(
+            field_slug="river-valley-01",
+            crop_slug="corn",
+            sowing_date=date(2026, 3, 1),
+            current_stage="planned",
+        ),
+        CropCycleSeedSpec(
+            field_slug="grain-belt-01",
+            crop_slug="wheat",
+            sowing_date=date(2026, 2, 20),
+            current_stage="planned",
+        ),
+        CropCycleSeedSpec(
+            field_slug="upland-terrace-01",
+            crop_slug="sunflower",
+            sowing_date=date(2026, 3, 5),
+            current_stage="planned",
+        ),
+        CropCycleSeedSpec(
+            field_slug="foothill-orchard-01",
+            crop_slug="blackberry",
+            sowing_date=date(2026, 2, 10),
+            current_stage="planned",
+        ),
+        CropCycleSeedSpec(
+            field_slug="alluvial-plain-01",
+            crop_slug="chickpea",
+            sowing_date=date(2026, 2, 25),
+            current_stage="planned",
+        ),
+    ]
+
+
 def _find_existing_crop(db: Session, crop_name: str) -> CropProfile | None:
     candidates = (
         db.query(CropProfile)
@@ -544,10 +767,49 @@ def _upsert_crops(db: Session, crop_specs: list[CropSeedSpec]) -> dict[str, int]
         crop.salinity_tolerance = spec.salinity_tolerance
         crop.rooting_depth_cm = spec.rooting_depth_cm
         crop.slope_tolerance = spec.slope_tolerance
+        crop.optimal_temp_min_c = spec.optimal_temp_min_c
+        crop.optimal_temp_max_c = spec.optimal_temp_max_c
+        crop.rainfall_requirement_mm = spec.rainfall_requirement_mm
+        crop.frost_tolerance_days = spec.frost_tolerance_days
+        crop.heat_tolerance_days = spec.heat_tolerance_days
+        crop.target_nitrogen_ppm = spec.target_nitrogen_ppm
+        crop.target_phosphorus_ppm = spec.target_phosphorus_ppm
+        crop.target_potassium_ppm = spec.target_potassium_ppm
         crop.organic_matter_preference = spec.organic_matter_preference
+        crop.growth_stages = spec.growth_stages
         crop.notes = _seed_note("crop", spec.slug, spec.description)
 
+        if crop.crop_price is None:
+            crop.crop_price = CropPrice(price_per_ton=spec.price_per_ton)
+        else:
+            crop.crop_price.price_per_ton = spec.price_per_ton
+
+        if crop.input_cost is None:
+            crop.input_cost = InputCost(
+                fertilizer_cost=spec.fertilizer_cost,
+                water_cost=spec.water_cost,
+                labor_cost=spec.labor_cost,
+            )
+        else:
+            crop.input_cost.fertilizer_cost = spec.fertilizer_cost
+            crop.input_cost.water_cost = spec.water_cost
+            crop.input_cost.labor_cost = spec.labor_cost
+
     return stats
+
+
+def _load_seed_crops_by_slug(db: Session) -> dict[str, CropProfile]:
+    seed_crops = (
+        db.query(CropProfile)
+        .filter(CropProfile.notes.is_not(None), CropProfile.notes.like(f"{SEED_TAG} crop_slug=%"))
+        .all()
+    )
+    crop_map: dict[str, CropProfile] = {}
+    for crop in seed_crops:
+        slug = _extract_seed_slug(crop.notes, "crop")
+        if slug:
+            crop_map[slug] = crop
+    return crop_map
 
 
 def _load_seed_fields_by_slug(db: Session) -> dict[str, Field]:
@@ -651,6 +913,98 @@ def _replace_seed_soil_tests(
     return {"replaced": len(soil_specs)}
 
 
+def _upsert_seed_crop_cycles(
+    db: Session,
+    *,
+    field_by_slug: dict[str, Field],
+    crop_by_slug: dict[str, CropProfile],
+    cycle_specs: list[CropCycleSeedSpec],
+) -> dict[str, int]:
+    """Upsert active crop cycles for the demo-managed management fields."""
+
+    stats = {"created": 0, "updated": 0}
+    for spec in cycle_specs:
+        field = field_by_slug[spec.field_slug]
+        crop = crop_by_slug[spec.crop_slug]
+        cycle = db.query(FieldCropCycle).filter(FieldCropCycle.field_id == field.id).first()
+        created = cycle is None
+        if created:
+            cycle = FieldCropCycle(
+                field_id=field.id,
+                crop_id=crop.id,
+                sowing_date=spec.sowing_date,
+                current_stage=spec.current_stage,
+            )
+            db.add(cycle)
+            stats["created"] += 1
+        else:
+            stats["updated"] += 1
+
+        cycle.crop_id = crop.id
+        cycle.sowing_date = spec.sowing_date
+        cycle.current_stage = spec.current_stage
+
+    return stats
+
+
+def _upsert_seed_weather_history(
+    db: Session,
+    *,
+    field_by_slug: dict[str, Field],
+    cycle_specs: list[CropCycleSeedSpec],
+) -> dict[str, int]:
+    """Upsert a recent weather window for the demo-managed management fields."""
+
+    stats = {"created": 0, "updated": 0}
+    window_end = date(2026, 3, 19)
+    window_start = window_end - timedelta(days=27)
+
+    for index, spec in enumerate(cycle_specs):
+        field = field_by_slug[spec.field_slug]
+        existing_records = {
+            record.date: record
+            for record in (
+                db.query(WeatherHistory)
+                .filter(WeatherHistory.field_id == field.id)
+                .filter(WeatherHistory.date >= window_start, WeatherHistory.date <= window_end)
+                .all()
+            )
+        }
+        rng = random.Random(SEED_RANDOM_SEED + 200 + index)
+        rainfall_bias = 0.8 if field.irrigation_available else 1.4
+
+        for day_offset in range(28):
+            observation_date = window_start + timedelta(days=day_offset)
+            seasonal_offset = (day_offset % 7) - 3
+            avg_temp = _round(14.0 + index * 1.8 + seasonal_offset * 0.6 + rng.uniform(-1.5, 1.5), 1)
+            min_temp = _round(avg_temp - rng.uniform(4.0, 7.0), 1)
+            max_temp = _round(avg_temp + rng.uniform(5.0, 8.0), 1)
+            rainfall_mm = _round(max(0.0, rainfall_bias + rng.uniform(-0.6, 4.2)), 1)
+            humidity = _round(_clamp(58.0 + rng.uniform(-10.0, 18.0), 35.0, 92.0), 1)
+            wind_speed = _round(max(1.5, 6.0 + rng.uniform(-2.0, 5.0)), 1)
+            solar_radiation = _round(max(6.0, 14.0 + rng.uniform(-2.5, 5.5)), 1)
+            et0 = _round(max(0.5, 2.6 + rng.uniform(-0.8, 1.4)), 1)
+
+            record = existing_records.get(observation_date)
+            if record is None:
+                record = WeatherHistory(field_id=field.id, date=observation_date)
+                db.add(record)
+                stats["created"] += 1
+            else:
+                stats["updated"] += 1
+
+            record.min_temp = min_temp
+            record.max_temp = max_temp
+            record.avg_temp = avg_temp
+            record.rainfall_mm = rainfall_mm
+            record.humidity = humidity
+            record.wind_speed = wind_speed
+            record.solar_radiation = solar_radiation
+            record.et0 = et0
+
+    return stats
+
+
 def seed(db: Session | None = None) -> None:
     """Seed deterministic MVP demo data into the configured database."""
 
@@ -665,11 +1019,24 @@ def seed(db: Session | None = None) -> None:
         crop_specs = build_crop_specs()
         field_specs = build_field_specs()
         soil_specs = build_soil_specs(field_specs)
+        cycle_specs = build_crop_cycle_specs()
 
         removed_legacy_fields = _cleanup_legacy_seed_fields(db)
         crop_stats = _upsert_crops(db, crop_specs)
         field_by_slug, field_stats = _sync_fields(db, field_specs)
         soil_stats = _replace_seed_soil_tests(db, field_by_slug, soil_specs)
+        crop_by_slug = _load_seed_crops_by_slug(db)
+        cycle_stats = _upsert_seed_crop_cycles(
+            db,
+            field_by_slug=field_by_slug,
+            crop_by_slug=crop_by_slug,
+            cycle_specs=cycle_specs,
+        )
+        weather_stats = _upsert_seed_weather_history(
+            db,
+            field_by_slug=field_by_slug,
+            cycle_specs=cycle_specs,
+        )
 
         db.commit()
 
@@ -679,7 +1046,9 @@ def seed(db: Session | None = None) -> None:
             f"({field_stats['created']} created, {field_stats['updated']} updated, {field_stats['removed']} removed, "
             f"{removed_legacy_fields} legacy cleaned), "
             f"{soil_stats['replaced']} soil tests replaced, "
-            f"{len(crop_specs)} crops ({crop_stats['created']} created, {crop_stats['updated']} updated)."
+            f"{len(crop_specs)} crops ({crop_stats['created']} created, {crop_stats['updated']} updated), "
+            f"{cycle_stats['created'] + cycle_stats['updated']} active crop cycles synced, "
+            f"{weather_stats['created'] + weather_stats['updated']} weather rows synced."
         )
         print("Run `python seed.py` to refresh the demo dataset.")
     except Exception:

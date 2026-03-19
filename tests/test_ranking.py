@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
 from app.engines.ranking_engine import rank_fields_for_crop
+from app.schemas.weather_history import ClimateSummary
+from app.services.economic_service import EconomicAssessment
 
 
 def make_field(field_id: int, name: str, **kwargs):
@@ -44,6 +46,30 @@ def make_soil(**kwargs):
     }
     values.update(kwargs)
     return SimpleNamespace(**values)
+
+
+def make_climate_summary(**kwargs):
+    values = {
+        "avg_temp": 24.0,
+        "total_rainfall": 650.0,
+        "frost_days": 1,
+        "heat_days": 10,
+    }
+    values.update(kwargs)
+    return ClimateSummary(**values)
+
+
+def make_economic_assessment(**kwargs):
+    values = {
+        "estimated_revenue": 20000.0,
+        "estimated_cost": 9000.0,
+        "estimated_profit": 11000.0,
+        "reasons": ["High profit due to high yield and low cost."],
+        "strengths": ["High profit due to high yield and low cost."],
+        "weaknesses": [],
+    }
+    values.update(kwargs)
+    return EconomicAssessment(**values)
 
 
 def test_rank_fields_for_crop_sorts_descending_by_total_score():
@@ -137,6 +163,66 @@ def test_rank_fields_for_crop_accepts_lookup_callable():
     assert ranked.ranked_fields[0].field_name == "Callable A"
 
 
+def test_rank_fields_for_crop_uses_climate_summaries_when_other_inputs_match():
+    field_a = make_field(1, "Climate Alpha")
+    field_b = make_field(2, "Climate Beta")
+    crop = make_crop(
+        optimal_temp_min_c=18.0,
+        optimal_temp_max_c=30.0,
+        rainfall_requirement_mm=650.0,
+        frost_tolerance_days=2,
+        heat_tolerance_days=20,
+    )
+    soil_map = {
+        1: make_soil(id=1),
+        2: make_soil(id=2),
+    }
+    climate_map = {
+        1: make_climate_summary(avg_temp=24.0, total_rainfall=650.0, frost_days=1, heat_days=10),
+        2: make_climate_summary(avg_temp=34.0, total_rainfall=250.0, frost_days=6, heat_days=30),
+    }
+
+    ranked = rank_fields_for_crop(
+        [field_a, field_b],
+        crop,
+        soil_map,
+        climate_summaries=climate_map,
+    )
+
+    assert [entry.field_id for entry in ranked.ranked_fields] == [1, 2]
+    assert "climate_compatibility" in ranked.ranked_fields[0].breakdown
+    assert ranked.ranked_fields[0].total_score > ranked.ranked_fields[1].total_score
+
+
+def test_rank_fields_for_crop_uses_economic_score_for_composite_ordering():
+    field_a = make_field(1, "Profit Alpha")
+    field_b = make_field(2, "Profit Beta")
+    crop = make_crop()
+    soil_map = {
+        1: make_soil(id=1, ph=6.4, depth_cm=130.0),
+        2: make_soil(id=2, ph=6.5, depth_cm=125.0),
+    }
+    economic_map = {
+        1: make_economic_assessment(estimated_profit=5000.0),
+        2: make_economic_assessment(
+            estimated_profit=15000.0,
+            estimated_revenue=26000.0,
+            estimated_cost=11000.0,
+        ),
+    }
+
+    ranked = rank_fields_for_crop(
+        [field_a, field_b],
+        crop,
+        soil_map,
+        economic_assessments=economic_map,
+    )
+
+    assert [entry.field_id for entry in ranked.ranked_fields] == [2, 1]
+    assert ranked.ranked_fields[0].economic_score > ranked.ranked_fields[1].economic_score
+    assert ranked.ranked_fields[0].ranking_score >= ranked.ranked_fields[0].total_score * 0.7
+
+
 def test_ranked_result_includes_breakdown_blockers_and_reasons():
     field_obj = make_field(1, "Detailed Field", irrigation_available=False)
     crop = make_crop(water_requirement_level="high")
@@ -148,10 +234,17 @@ def test_ranked_result_includes_breakdown_blockers_and_reasons():
     assert entry.field_name == "Detailed Field"
     assert "ph_compatibility" in entry.breakdown
     assert isinstance(entry.reasons, list)
+    assert entry.economic_score == 0.0
+    assert entry.estimated_profit is None
+    assert entry.ranking_score == entry.total_score
     assert any(blocker.code == "no_irrigation_high_water_crop" for blocker in entry.blockers)
 
 
-def test_rank_fields_api_returns_wrapped_ranking_response(client):
+def test_rank_fields_api_returns_wrapped_ranking_response(client, db):
+    from app.models.crop_price import CropPrice
+    from app.models.input_cost import InputCost
+    from app.services.crop_service import get_crop
+
     field1 = client.post("/api/v1/fields/", json={
         "name": "Field Alpha",
         "location_name": "Zone A",
@@ -213,6 +306,11 @@ def test_rank_fields_api_returns_wrapped_ranking_response(client):
         "organic_matter_preference": "moderate",
     }).json()
 
+    crop_model = get_crop(db, crop["id"])
+    crop_model.crop_price = CropPrice(price_per_ton=210.0)
+    crop_model.input_cost = InputCost(fertilizer_cost=240.0, water_cost=165.0, labor_cost=130.0)
+    db.commit()
+
     response = client.post("/api/v1/rank-fields/", json={
         "crop_id": crop["id"],
         "top_n": 5,
@@ -232,6 +330,9 @@ def test_rank_fields_api_returns_wrapped_ranking_response(client):
         "field_id",
         "field_name",
         "total_score",
+        "economic_score",
+        "estimated_profit",
+        "ranking_score",
         "breakdown",
         "blockers",
         "reasons",
@@ -245,9 +346,15 @@ def test_rank_fields_api_returns_wrapped_ranking_response(client):
         "risks",
     }
     assert "No irrigation available for a high water-demand crop." in payload["ranked_results"][1]["explanation"]["risks"]
+    assert payload["ranked_results"][0]["estimated_profit"] is not None
+    assert isinstance(payload["ranked_results"][0]["economic_score"], float)
 
 
-def test_rank_fields_api_respects_field_filter_and_keeps_missing_soil_entries(client):
+def test_rank_fields_api_respects_field_filter_and_keeps_missing_soil_entries(client, db):
+    from app.models.crop_price import CropPrice
+    from app.models.input_cost import InputCost
+    from app.services.crop_service import get_crop
+
     field1 = client.post("/api/v1/fields/", json={
         "name": "Field One",
         "location_name": "Zone A",
@@ -307,6 +414,11 @@ def test_rank_fields_api_respects_field_filter_and_keeps_missing_soil_entries(cl
         "slope_tolerance": 5.0,
         "organic_matter_preference": "moderate",
     }).json()
+
+    crop_model = get_crop(db, crop["id"])
+    crop_model.crop_price = CropPrice(price_per_ton=210.0)
+    crop_model.input_cost = InputCost(fertilizer_cost=240.0, water_cost=165.0, labor_cost=130.0)
+    db.commit()
 
     response = client.post("/api/v1/rank-fields/", json={
         "crop_id": crop["id"],

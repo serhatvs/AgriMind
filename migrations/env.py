@@ -7,7 +7,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.database import Base
-from app.models import field, soil_test, crop_profile, recommendation  # noqa
+from app.models import crop_price, crop_profile, feedback, field, field_crop_cycle, input_cost, recommendation, soil_test, weather_history  # noqa
 
 config = context.config
 if config.config_file_name is not None:

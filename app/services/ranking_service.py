@@ -14,8 +14,10 @@ from app.schemas.ranking import (
     ScoreComponentRead,
 )
 from app.services.crop_service import get_crop
+from app.services.economic_service import EconomicService
 from app.services.field_service import get_all_fields, get_fields_by_ids
 from app.services.soil_service import get_latest_soil_test_for_field
+from app.services.weather_service import WeatherService
 
 
 def _serialize_breakdown(breakdown: dict[str, object]) -> dict[str, ScoreComponentRead]:
@@ -35,6 +37,9 @@ def _serialize_ranked_result(entry: RankedFieldResultInternal) -> RankedFieldRec
         field_id=entry.field_id,
         field_name=entry.field_name,
         total_score=entry.total_score,
+        economic_score=entry.economic_score,
+        estimated_profit=entry.estimated_profit,
+        ranking_score=entry.ranking_score,
         breakdown=_serialize_breakdown(entry.breakdown),
         blockers=_serialize_blockers(entry.blockers),
         reasons=entry.reasons,
@@ -70,7 +75,29 @@ def get_ranked_fields_response(
         field.id: get_latest_soil_test_for_field(db, field.id)
         for field in fields
     }
-    ranking = rank_fields_for_crop(fields, crop, soil_lookup, top_n=top_n)
+    weather_service = WeatherService(db)
+    climate_lookup = {
+        field.id: weather_service.get_climate_summary(field.id)
+        for field in fields
+    }
+    economic_service = EconomicService(db)
+    economic_lookup = {
+        field.id: economic_service.calculate_profit(
+            field,
+            crop,
+            soil_test=soil_lookup[field.id],
+            climate_summary=climate_lookup[field.id],
+        )
+        for field in fields
+    }
+    ranking = rank_fields_for_crop(
+        fields,
+        crop,
+        soil_lookup,
+        top_n=top_n,
+        climate_summaries=climate_lookup,
+        economic_assessments=economic_lookup,
+    )
 
     return RankFieldsResponse(
         crop=CropSummary.model_validate(crop),

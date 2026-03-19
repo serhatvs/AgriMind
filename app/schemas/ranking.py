@@ -59,6 +59,9 @@ class RankedFieldRecommendation(BaseModel):
     field_id: int
     field_name: str
     total_score: float
+    economic_score: float
+    estimated_profit: float | None
+    ranking_score: float
     breakdown: dict[str, ScoreComponentRead]
     blockers: list[ScoreBlockerRead]
     reasons: list[str]

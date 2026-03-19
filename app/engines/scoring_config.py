@@ -39,12 +39,30 @@ class SoilSubWeights:
 
 
 @dataclass(frozen=True, slots=True)
+class ClimateSubWeights:
+    """Relative subweights within the climate compatibility dimension."""
+
+    temperature: float
+    rainfall: float
+    frost: float
+    heat: float
+
+
+@dataclass(frozen=True, slots=True)
 class ThresholdConfig:
     """Thresholds and reference bands used by the scoring engine."""
 
     ph_blocker_delta: float
     rooting_depth_partial_ratio: float
     slope_zero_ratio: float
+    temperature_buffer_c: float
+    rainfall_ideal_lower_ratio: float
+    rainfall_ideal_upper_ratio: float
+    rainfall_acceptable_lower_ratio: float
+    rainfall_acceptable_upper_ratio: float
+    frost_tolerance_partial_multiplier: float
+    heat_tolerance_partial_multiplier: float
+    missing_climate_ratio: float
     organic_matter_bands: dict[str, RangeBand]
     ec_bands: dict[str, SalinityBand]
 
@@ -58,7 +76,9 @@ class SuitabilityScoringConfig:
     drainage_compatibility: float
     water_availability_compatibility: float
     slope_compatibility: float
+    climate_compatibility: float
     soil_subweights: SoilSubWeights
+    climate_subweights: ClimateSubWeights
     thresholds: ThresholdConfig
 
     @property
@@ -71,6 +91,7 @@ class SuitabilityScoringConfig:
             + self.drainage_compatibility
             + self.water_availability_compatibility
             + self.slope_compatibility
+            + self.climate_compatibility
         )
 
 
@@ -84,9 +105,11 @@ def load_scoring_config(path: str | Path = CONFIG_PATH) -> SuitabilityScoringCon
 
     dimensions = raw["dimensions"]
     soil_config = raw["soil_compatibility"]
+    climate_config = raw["climate_compatibility"]
     thresholds = raw["thresholds"]
 
     soil_subweights = SoilSubWeights(**soil_config["subweights"])
+    climate_subweights = ClimateSubWeights(**climate_config["subweights"])
     organic_matter_bands = {
         key: RangeBand(**band)
         for key, band in thresholds["organic_matter_bands"].items()
@@ -100,6 +123,14 @@ def load_scoring_config(path: str | Path = CONFIG_PATH) -> SuitabilityScoringCon
         ph_blocker_delta=thresholds["ph_blocker_delta"],
         rooting_depth_partial_ratio=thresholds["rooting_depth_partial_ratio"],
         slope_zero_ratio=thresholds["slope_zero_ratio"],
+        temperature_buffer_c=thresholds["temperature_buffer_c"],
+        rainfall_ideal_lower_ratio=thresholds["rainfall_ideal_lower_ratio"],
+        rainfall_ideal_upper_ratio=thresholds["rainfall_ideal_upper_ratio"],
+        rainfall_acceptable_lower_ratio=thresholds["rainfall_acceptable_lower_ratio"],
+        rainfall_acceptable_upper_ratio=thresholds["rainfall_acceptable_upper_ratio"],
+        frost_tolerance_partial_multiplier=thresholds["frost_tolerance_partial_multiplier"],
+        heat_tolerance_partial_multiplier=thresholds["heat_tolerance_partial_multiplier"],
+        missing_climate_ratio=thresholds["missing_climate_ratio"],
         organic_matter_bands=organic_matter_bands,
         ec_bands=ec_bands,
     )
@@ -110,6 +141,8 @@ def load_scoring_config(path: str | Path = CONFIG_PATH) -> SuitabilityScoringCon
         drainage_compatibility=dimensions["drainage_compatibility"],
         water_availability_compatibility=dimensions["water_availability_compatibility"],
         slope_compatibility=dimensions["slope_compatibility"],
+        climate_compatibility=dimensions["climate_compatibility"],
         soil_subweights=soil_subweights,
+        climate_subweights=climate_subweights,
         thresholds=threshold_config,
     )

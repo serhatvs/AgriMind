@@ -1,3 +1,4 @@
+from app.models.crop_price import CropPrice
 from app.models.crop_profile import CropProfile
 from app.models.enums import (
     CropDrainageRequirement,
@@ -7,7 +8,10 @@ from app.models.enums import (
     WaterSourceType,
 )
 from app.models.field import Field
+from app.models.field_crop_cycle import FieldCropCycle
+from app.models.input_cost import InputCost
 from app.models.soil_test import SoilTest
+from app.models.weather_history import WeatherHistory
 from app.services.soil_service import get_latest_soil_test_for_field
 from seed import SEED_TAG, build_field_specs, seed
 
@@ -24,25 +28,79 @@ def _seed_crop_count(db) -> int:
     return db.query(CropProfile).filter(CropProfile.notes.like(f"{SEED_TAG}%")).count()
 
 
+def _seed_crop_price_count(db) -> int:
+    return db.query(CropPrice).join(CropProfile, CropProfile.id == CropPrice.crop_id).filter(CropProfile.notes.like(f"{SEED_TAG}%")).count()
+
+
+def _seed_input_cost_count(db) -> int:
+    return db.query(InputCost).join(CropProfile, CropProfile.id == InputCost.crop_id).filter(CropProfile.notes.like(f"{SEED_TAG}%")).count()
+
+
+def _seed_cycle_count(db) -> int:
+    return (
+        db.query(FieldCropCycle)
+        .join(Field, Field.id == FieldCropCycle.field_id)
+        .filter(Field.notes.like(f"{SEED_TAG}%"))
+        .count()
+    )
+
+
+def _seed_weather_count(db) -> int:
+    return (
+        db.query(WeatherHistory)
+        .join(Field, Field.id == WeatherHistory.field_id)
+        .filter(Field.notes.like(f"{SEED_TAG}%"))
+        .count()
+    )
+
+
 def test_seed_creates_expected_seed_managed_counts(db):
     seed(db)
 
     assert _seed_field_count(db) == 50
     assert _seed_soil_count(db) == 50
     assert _seed_crop_count(db) == 5
+    assert _seed_crop_price_count(db) == 5
+    assert _seed_input_cost_count(db) == 5
+    assert _seed_cycle_count(db) == 5
+    assert _seed_weather_count(db) == 140
 
-    crop_names = {crop.crop_name.lower() for crop in db.query(CropProfile).filter(CropProfile.notes.like(f"{SEED_TAG}%")).all()}
+    seeded_crops = db.query(CropProfile).filter(CropProfile.notes.like(f"{SEED_TAG}%")).all()
+    crop_names = {crop.crop_name.lower() for crop in seeded_crops}
     assert crop_names == {"blackberry", "corn", "wheat", "sunflower", "chickpea"}
+    assert all(crop.optimal_temp_min_c is not None for crop in seeded_crops)
+    assert all(crop.optimal_temp_max_c is not None for crop in seeded_crops)
+    assert all(crop.rainfall_requirement_mm is not None for crop in seeded_crops)
+    assert all(crop.frost_tolerance_days is not None for crop in seeded_crops)
+    assert all(crop.heat_tolerance_days is not None for crop in seeded_crops)
+    assert all(crop.target_nitrogen_ppm is not None for crop in seeded_crops)
+    assert all(crop.target_phosphorus_ppm is not None for crop in seeded_crops)
+    assert all(crop.target_potassium_ppm is not None for crop in seeded_crops)
+    assert all(crop.growth_stages for crop in seeded_crops)
+    assert all(crop.crop_price is not None for crop in seeded_crops)
+    assert all(crop.input_cost is not None for crop in seeded_crops)
 
 
 def test_seed_rerun_does_not_duplicate_seed_records(db):
     seed(db)
-    first_counts = (_seed_field_count(db), _seed_soil_count(db), _seed_crop_count(db))
+    first_counts = (
+        _seed_field_count(db),
+        _seed_soil_count(db),
+        _seed_crop_count(db),
+        _seed_cycle_count(db),
+        _seed_weather_count(db),
+    )
 
     seed(db)
-    second_counts = (_seed_field_count(db), _seed_soil_count(db), _seed_crop_count(db))
+    second_counts = (
+        _seed_field_count(db),
+        _seed_soil_count(db),
+        _seed_crop_count(db),
+        _seed_cycle_count(db),
+        _seed_weather_count(db),
+    )
 
-    assert first_counts == second_counts == (50, 50, 5)
+    assert first_counts == second_counts == (50, 50, 5, 5, 140)
 
 
 def test_seed_updates_existing_seed_managed_fields_in_place(db):

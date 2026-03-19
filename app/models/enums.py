@@ -39,6 +39,14 @@ class WaterRequirementLevel(str, Enum):
     HIGH = "high"
 
 
+class ManagementNeedLevel(str, Enum):
+    """Relative stage-based management need levels."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class CropDrainageRequirement(str, Enum):
     """Supported crop drainage requirement classes."""
 

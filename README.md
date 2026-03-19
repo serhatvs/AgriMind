@@ -24,17 +24,18 @@ Implemented today:
 
 - `fields`: CRUD for field metadata such as area, slope, irrigation availability, and drainage quality
 - `soil_tests`: soil chemistry and texture records per field
-- `crops`: crop requirement profiles including pH, nutrient, water, drainage, slope, and minimum area requirements
+- `crops`: crop requirement profiles including pH, nutrient targets, water, drainage, slope, and minimum area requirements
 - `rank-fields`: rank multiple fields for a selected crop
 - `recommendation`: generate a scored recommendation and human-readable explanation for a field/crop pair
+- `management-plan`: generate a structured weekly irrigation and fertilizer plan for an active field crop cycle
+- `agri-assistant`: ask grounded natural-language questions over deterministic ranking and explanation results
 
 Not implemented yet:
 
 - yield prediction models
 - risk prediction models
 - economic optimization
-- irrigation and fertilization planning
-- LLM or RAG integration
+- conversation memory or RAG integration
 - frontend dashboard
 
 ## How The MVP Makes Decisions
@@ -89,6 +90,8 @@ Example:
 
 ```env
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agrimind
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
 ```
 
 The default configuration is defined in [`app/config.py`](/c:/Users/VICTUS/Workspace/AgriMind/app/config.py).
@@ -122,8 +125,10 @@ See full examples in [`docs/API.md`](/c:/Users/VICTUS/Workspace/AgriMind/docs/AP
 - `POST /api/v1/soil-tests/`
 - `GET /api/v1/soil-tests/field/{field_id}`
 - `POST /api/v1/crops/`
+- `GET /api/v1/fields/{field_id}/management-plan`
 - `POST /api/v1/rank-fields/`
 - `GET /api/v1/recommendation/{field_id}/{crop_id}`
+- `POST /api/v1/agri-assistant/ask`
 
 ## Roadmap
 

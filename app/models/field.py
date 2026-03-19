@@ -12,7 +12,16 @@ from app.models.enums import FieldAspect, WaterSourceType
 from app.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
+    from app.models.feedback import RecommendationResult, SeasonResult, UserDecision
+    from app.models.field_crop_cycle import FieldCropCycle
     from app.models.soil_test import SoilTest
+    from app.models.weather_history import WeatherHistory
+
+
+def _weather_history_order_by():
+    from app.models.weather_history import WeatherHistory
+
+    return WeatherHistory.date.desc(), WeatherHistory.created_at.desc()
 
 
 class Field(TimestampMixin, Base):
@@ -64,4 +73,28 @@ class Field(TimestampMixin, Base):
         "SoilTest",
         back_populates="field",
         cascade="all, delete-orphan",
+    )
+    weather_history: Mapped[list["WeatherHistory"]] = relationship(
+        "WeatherHistory",
+        back_populates="field",
+        cascade="all, delete-orphan",
+        order_by=_weather_history_order_by,
+    )
+    recommendation_results: Mapped[list["RecommendationResult"]] = relationship(
+        "RecommendationResult",
+        back_populates="field",
+    )
+    user_decisions: Mapped[list["UserDecision"]] = relationship(
+        "UserDecision",
+        back_populates="selected_field",
+    )
+    season_results: Mapped[list["SeasonResult"]] = relationship(
+        "SeasonResult",
+        back_populates="field",
+    )
+    crop_cycle: Mapped["FieldCropCycle | None"] = relationship(
+        "FieldCropCycle",
+        back_populates="field",
+        cascade="all, delete-orphan",
+        uselist=False,
     )

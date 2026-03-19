@@ -44,6 +44,7 @@ COMPONENT_ORDER = [
     "drainage_compatibility",
     "water_availability_compatibility",
     "slope_compatibility",
+    "climate_compatibility",
 ]
 COMPONENT_ORDER_INDEX = {key: index for index, key in enumerate(COMPONENT_ORDER)}
 
@@ -51,9 +52,12 @@ COMPONENT_ORDER_INDEX = {key: index for index, key in enumerate(COMPONENT_ORDER)
 class _SupportsRankedExplanation(Protocol):
     field_name: str
     total_score: float
+    ranking_score: float
     breakdown: dict[str, ScoreComponent]
     blockers: list[ScoreBlocker]
     reasons: list[str]
+    economic_strengths: list[str]
+    economic_weaknesses: list[str]
     result: SuitabilityResult
 
 
@@ -62,11 +66,13 @@ class _ExplanationContext:
     """Normalized explanation input shared by ranking and recommendation flows."""
 
     field_name: str
-    total_score: float
+    display_score: float
     breakdown: dict[str, ScoreComponent]
     penalties: list[ScorePenalty]
     blockers: list[ScoreBlocker]
     reasons: list[str]
+    economic_strengths: list[str]
+    economic_weaknesses: list[str]
 
 
 def _ordered_components(breakdown: dict[str, ScoreComponent]) -> list[tuple[str, ScoreComponent]]:
@@ -134,15 +140,22 @@ def _suitability_label(total_score: float, blockers: list[ScoreBlocker]) -> str:
     return "marginally suitable"
 
 
-def _collect_strengths(breakdown: dict[str, ScoreComponent]) -> list[str]:
+def _collect_strengths(
+    breakdown: dict[str, ScoreComponent],
+    economic_strengths: list[str],
+) -> list[str]:
     strengths: list[str] = []
     for _, component in _ordered_components(breakdown):
         if component.status is ScoreStatus.IDEAL:
             strengths.extend(component.reasons)
+    strengths.extend(economic_strengths)
     return _dedupe_messages(strengths)
 
 
-def _collect_weaknesses(penalties: list[ScorePenalty]) -> list[str]:
+def _collect_weaknesses(
+    penalties: list[ScorePenalty],
+    economic_weaknesses: list[str],
+) -> list[str]:
     ordered_penalties = sorted(
         penalties,
         key=lambda penalty: (
@@ -150,7 +163,9 @@ def _collect_weaknesses(penalties: list[ScorePenalty]) -> list[str]:
             COMPONENT_ORDER_INDEX.get(penalty.dimension, len(COMPONENT_ORDER_INDEX)),
         ),
     )
-    return _dedupe_messages([penalty.message for penalty in ordered_penalties])
+    weaknesses = [penalty.message for penalty in ordered_penalties]
+    weaknesses.extend(economic_weaknesses)
+    return _dedupe_messages(weaknesses)
 
 
 def _collect_risks(
@@ -179,26 +194,26 @@ def _collect_additional_reasons(
 
 
 def _build_short_explanation(
-    total_score: float,
+    display_score: float,
     strengths: list[str],
     weaknesses: list[str],
     risks: list[str],
     reasons: list[str],
     blockers: list[ScoreBlocker],
 ) -> str:
-    label = _suitability_label(total_score, blockers)
+    label = _suitability_label(display_score, blockers)
 
     if blockers and risks:
         return _as_sentence(
             f"This field is {label} because {_join_clauses(risks[:2])}"
         )
 
-    if total_score >= 80 and strengths:
+    if display_score >= 80 and strengths:
         return _as_sentence(
             f"This field ranked highly because {_join_clauses(strengths[:2])}"
         )
 
-    if total_score >= 60 and strengths:
+    if display_score >= 60 and strengths:
         return _as_sentence(
             f"This field is {label} because {_join_clauses(strengths[:2])}"
         )
@@ -223,17 +238,17 @@ def _build_short_explanation(
 
 def _build_detailed_explanation(
     field_name: str,
-    total_score: float,
+    display_score: float,
     strengths: list[str],
     weaknesses: list[str],
     risks: list[str],
     additional_reasons: list[str],
     blockers: list[ScoreBlocker],
 ) -> str:
-    label = _suitability_label(total_score, blockers)
+    label = _suitability_label(display_score, blockers)
     sentences = [
         _as_sentence(
-            f"Field '{field_name}' is {label} based on the current scoring results (score: {total_score:.1f}/100)"
+            f"Field '{field_name}' is {label} based on the current scoring results (score: {display_score:.1f}/100)"
         )
     ]
 
@@ -259,8 +274,8 @@ def _build_detailed_explanation(
 
 
 def _build_explanation(context: _ExplanationContext) -> FieldExplanation:
-    strengths = _collect_strengths(context.breakdown)
-    weaknesses = _collect_weaknesses(context.penalties)
+    strengths = _collect_strengths(context.breakdown, context.economic_strengths)
+    weaknesses = _collect_weaknesses(context.penalties, context.economic_weaknesses)
     risks = _collect_risks(context.breakdown, context.blockers)
     additional_reasons = _collect_additional_reasons(
         context.reasons,
@@ -271,7 +286,7 @@ def _build_explanation(context: _ExplanationContext) -> FieldExplanation:
 
     return FieldExplanation(
         short_explanation=_build_short_explanation(
-            context.total_score,
+            context.display_score,
             strengths,
             weaknesses,
             risks,
@@ -280,7 +295,7 @@ def _build_explanation(context: _ExplanationContext) -> FieldExplanation:
         ),
         detailed_explanation=_build_detailed_explanation(
             context.field_name,
-            context.total_score,
+            context.display_score,
             strengths,
             weaknesses,
             risks,
@@ -298,11 +313,13 @@ def build_ranked_field_explanation(ranked_result: _SupportsRankedExplanation) ->
 
     context = _ExplanationContext(
         field_name=ranked_result.field_name,
-        total_score=ranked_result.total_score,
+        display_score=getattr(ranked_result, "ranking_score", ranked_result.total_score),
         breakdown=ranked_result.breakdown,
         penalties=ranked_result.result.penalties,
         blockers=ranked_result.blockers,
         reasons=ranked_result.reasons,
+        economic_strengths=getattr(ranked_result, "economic_strengths", []),
+        economic_weaknesses=getattr(ranked_result, "economic_weaknesses", []),
     )
     return _build_explanation(context)
 
@@ -317,11 +334,13 @@ def build_suitability_explanation(
     _ = rank
     context = _ExplanationContext(
         field_name=field_obj.name,
-        total_score=result.total_score,
+        display_score=result.total_score,
         breakdown=result.score_breakdown,
         penalties=result.penalties,
         blockers=result.blockers,
         reasons=result.reasons,
+        economic_strengths=[],
+        economic_weaknesses=[],
     )
     return _build_explanation(context)
 
