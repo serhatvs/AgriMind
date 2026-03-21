@@ -33,6 +33,7 @@ from app.ai.contracts.yield_prediction import (
     YieldPredictionOutput,
     build_yield_prediction_input_from_entities,
 )
+from app.config import settings
 from app.models.crop_profile import CropProfile
 from app.models.field import Field
 from app.models.soil_test import SoilTest
@@ -53,12 +54,16 @@ NUMERIC_FEATURES = (
     "nitrogen_ppm",
     "phosphorus_ppm",
     "potassium_ppm",
+    "calcium_ppm",
+    "magnesium_ppm",
     "soil_depth_cm",
     "water_holding_capacity",
     "slope_percent",
     "area_hectares",
     "elevation_meters",
     "infrastructure_score",
+    "crop_ideal_ph_min",
+    "crop_ideal_ph_max",
     "crop_rooting_depth_cm",
     "crop_slope_tolerance",
     "crop_optimal_temp_min_c",
@@ -67,9 +72,15 @@ NUMERIC_FEATURES = (
     "crop_frost_tolerance_days",
     "crop_heat_tolerance_days",
     "climate_avg_temp",
+    "climate_min_observed_temp",
+    "climate_max_observed_temp",
     "climate_total_rainfall",
     "climate_frost_days",
     "climate_heat_days",
+    "climate_avg_humidity",
+    "climate_avg_wind_speed",
+    "climate_avg_solar_radiation",
+    "climate_weather_record_count",
 )
 
 CATEGORICAL_FEATURES = (
@@ -81,6 +92,8 @@ CATEGORICAL_FEATURES = (
     "aspect",
     "crop_water_requirement",
     "crop_drainage_requirement",
+    "crop_frost_sensitivity",
+    "crop_heat_sensitivity",
     "crop_salinity_tolerance",
     "crop_organic_matter_preference",
 )
@@ -98,12 +111,16 @@ NUMERIC_DEFAULTS = {
     "nitrogen_ppm": 40.0,
     "phosphorus_ppm": 25.0,
     "potassium_ppm": 180.0,
+    "calcium_ppm": 1650.0,
+    "magnesium_ppm": 220.0,
     "soil_depth_cm": 110.0,
     "water_holding_capacity": 20.0,
     "slope_percent": 4.0,
     "area_hectares": 12.0,
     "elevation_meters": 250.0,
     "infrastructure_score": 60.0,
+    "crop_ideal_ph_min": 6.0,
+    "crop_ideal_ph_max": 7.0,
     "crop_rooting_depth_cm": 110.0,
     "crop_slope_tolerance": 8.0,
     "crop_optimal_temp_min_c": 16.0,
@@ -112,15 +129,21 @@ NUMERIC_DEFAULTS = {
     "crop_frost_tolerance_days": 12.0,
     "crop_heat_tolerance_days": 10.0,
     "climate_avg_temp": 20.0,
+    "climate_min_observed_temp": 10.0,
+    "climate_max_observed_temp": 28.0,
     "climate_total_rainfall": 480.0,
     "climate_frost_days": 5.0,
     "climate_heat_days": 6.0,
+    "climate_avg_humidity": 58.0,
+    "climate_avg_wind_speed": 4.0,
+    "climate_avg_solar_radiation": 17.0,
+    "climate_weather_record_count": 30.0,
 }
 
 MISSING_CATEGORY = "__missing__"
 MODEL_FILENAME = "yield_model.json"
 METADATA_FILENAME = "yield_model_metadata.json"
-MODEL_VERSION = "yield-xgb-v1"
+MODEL_VERSION = settings.YIELD_MODEL_VERSION
 
 
 @dataclass(slots=True)
@@ -134,6 +157,8 @@ class YieldFeatureBundle:
     nitrogen_ppm: float | None
     phosphorus_ppm: float | None
     potassium_ppm: float | None
+    calcium_ppm: float | None
+    magnesium_ppm: float | None
     soil_depth_cm: float | None
     water_holding_capacity: float | None
     texture_class: str | None
@@ -146,8 +171,12 @@ class YieldFeatureBundle:
     infrastructure_score: int | None
     water_source_type: str | None
     aspect: str | None
+    crop_ideal_ph_min: float | None
+    crop_ideal_ph_max: float | None
     crop_water_requirement: str
     crop_drainage_requirement: str
+    crop_frost_sensitivity: str | None
+    crop_heat_sensitivity: str | None
     crop_salinity_tolerance: str | None
     crop_rooting_depth_cm: float | None
     crop_slope_tolerance: float | None
@@ -158,9 +187,15 @@ class YieldFeatureBundle:
     crop_heat_tolerance_days: int | None
     crop_organic_matter_preference: str | None
     climate_avg_temp: float | None
+    climate_min_observed_temp: float | None
+    climate_max_observed_temp: float | None
     climate_total_rainfall: float | None
     climate_frost_days: int | None
     climate_heat_days: int | None
+    climate_avg_humidity: float | None
+    climate_avg_wind_speed: float | None
+    climate_avg_solar_radiation: float | None
+    climate_weather_record_count: int | None
     has_soil_test: bool = True
     has_climate_summary: bool = True
 
@@ -181,6 +216,8 @@ class YieldFeatureBundle:
             nitrogen_ppm=soil.nitrogen_ppm if soil is not None else None,
             phosphorus_ppm=soil.phosphorus_ppm if soil is not None else None,
             potassium_ppm=soil.potassium_ppm if soil is not None else None,
+            calcium_ppm=soil.calcium_ppm if soil is not None else None,
+            magnesium_ppm=soil.magnesium_ppm if soil is not None else None,
             soil_depth_cm=soil.depth_cm if soil is not None else None,
             water_holding_capacity=soil.water_holding_capacity if soil is not None else None,
             texture_class=soil.texture_class if soil is not None else None,
@@ -193,8 +230,12 @@ class YieldFeatureBundle:
             infrastructure_score=input_data.field.infrastructure_score,
             water_source_type=input_data.field.water_source_type,
             aspect=input_data.field.aspect,
+            crop_ideal_ph_min=input_data.crop.ideal_ph_min,
+            crop_ideal_ph_max=input_data.crop.ideal_ph_max,
             crop_water_requirement=input_data.crop.water_requirement_level,
             crop_drainage_requirement=input_data.crop.drainage_requirement,
+            crop_frost_sensitivity=input_data.crop.frost_sensitivity,
+            crop_heat_sensitivity=input_data.crop.heat_sensitivity,
             crop_salinity_tolerance=input_data.crop.salinity_tolerance,
             crop_rooting_depth_cm=input_data.crop.rooting_depth_cm,
             crop_slope_tolerance=input_data.crop.slope_tolerance,
@@ -205,9 +246,15 @@ class YieldFeatureBundle:
             crop_heat_tolerance_days=input_data.crop.heat_tolerance_days,
             crop_organic_matter_preference=input_data.crop.organic_matter_preference,
             climate_avg_temp=climate.avg_temp if climate is not None else None,
+            climate_min_observed_temp=climate.min_observed_temp if climate is not None else None,
+            climate_max_observed_temp=climate.max_observed_temp if climate is not None else None,
             climate_total_rainfall=climate.total_rainfall if climate is not None else None,
             climate_frost_days=climate.frost_days if climate is not None else None,
             climate_heat_days=climate.heat_days if climate is not None else None,
+            climate_avg_humidity=climate.avg_humidity if climate is not None else None,
+            climate_avg_wind_speed=climate.avg_wind_speed if climate is not None else None,
+            climate_avg_solar_radiation=climate.avg_solar_radiation if climate is not None else None,
+            climate_weather_record_count=climate.weather_record_count if climate is not None else None,
             has_soil_test=soil is not None,
             has_climate_summary=climate is not None,
         )
@@ -251,6 +298,8 @@ class YieldFeatureBundle:
                 "nitrogen_ppm",
                 "phosphorus_ppm",
                 "potassium_ppm",
+                "calcium_ppm",
+                "magnesium_ppm",
                 "soil_depth_cm",
                 "water_holding_capacity",
                 "texture_class",
@@ -259,6 +308,10 @@ class YieldFeatureBundle:
                 "water_source_type",
                 "aspect",
                 "crop_salinity_tolerance",
+                "crop_ideal_ph_min",
+                "crop_ideal_ph_max",
+                "crop_frost_sensitivity",
+                "crop_heat_sensitivity",
                 "crop_rooting_depth_cm",
                 "crop_slope_tolerance",
                 "crop_optimal_temp_min_c",
@@ -268,9 +321,15 @@ class YieldFeatureBundle:
                 "crop_heat_tolerance_days",
                 "crop_organic_matter_preference",
                 "climate_avg_temp",
+                "climate_min_observed_temp",
+                "climate_max_observed_temp",
                 "climate_total_rainfall",
                 "climate_frost_days",
                 "climate_heat_days",
+                "climate_avg_humidity",
+                "climate_avg_wind_speed",
+                "climate_avg_solar_radiation",
+                "climate_weather_record_count",
             )
         ]
         missing = sum(value is None for value in values)
@@ -469,18 +528,20 @@ class YieldPredictionPipeline:
 
         return YieldPredictionOutput(
             predicted_yield=predicted_yield,
-            yield_range_min=range_min,
-            yield_range_max=range_max,
+            predicted_yield_min=range_min,
+            predicted_yield_max=range_max,
             metadata=AITraceMetadata(
-                provider_name=self.training_source,
+                provider_name="xgboost_yield_prediction",
                 provider_version=MODEL_VERSION,
                 generated_at=datetime.now(timezone.utc),
                 confidence=confidence,
                 debug_info={
+                    "training_source": self.training_source,
                     "missing_feature_ratio": round(features.missing_feature_ratio(), 4),
                     "metrics": asdict(self.metrics) if self.metrics is not None else None,
                 },
             ),
+            training_source=self.training_source,
         )
 
     def save(self, output_dir: str | Path) -> Path:

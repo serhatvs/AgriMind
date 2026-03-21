@@ -31,6 +31,8 @@ class _SupportsExplanationFeatureAssembly(Protocol):
     crop_id: int
     total_score: float
     economic_score: float
+    estimated_revenue: float | None
+    estimated_cost: float | None
     estimated_profit: float | None
     ranking_score: float
     breakdown: dict[str, ScoreComponent]
@@ -38,6 +40,7 @@ class _SupportsExplanationFeatureAssembly(Protocol):
     reasons: list[str]
     economic_strengths: list[str]
     economic_weaknesses: list[str]
+    economic_risks: list[str]
     result: SuitabilityResult
     feature_context: FeatureSummaryBundle | None
 
@@ -56,11 +59,16 @@ def build_explanation_input(
 
     strengths = list(getattr(ranked_result, "economic_strengths", []))
     weaknesses = list(getattr(ranked_result, "economic_weaknesses", []))
+    risks = list(getattr(ranked_result, "economic_risks", []))
     economic_metadata = None
-    if strengths or weaknesses:
+    if strengths or weaknesses or risks:
         economic_metadata = ExplanationEconomicMetadata(
             strengths=strengths,
             weaknesses=weaknesses,
+            risks=risks,
+            estimated_revenue=getattr(ranked_result, "estimated_revenue", None),
+            estimated_cost=getattr(ranked_result, "estimated_cost", None),
+            estimated_profit=getattr(ranked_result, "estimated_profit", None),
         )
 
     return build_explanation_input_from_ranked_request(
@@ -74,6 +82,7 @@ def build_explanation_input(
             penalties=ranked_result.result.penalties,
             economic_strengths=strengths,
             economic_weaknesses=weaknesses,
+            economic_risks=risks,
             economic_metadata=economic_metadata,
             field_id=ranked_result.field_id,
             crop_id=ranked_result.crop_id,

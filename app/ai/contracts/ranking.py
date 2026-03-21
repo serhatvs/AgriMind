@@ -13,6 +13,7 @@ class RankingAugmentationCandidate(Protocol):
     scoring_result: SuitabilityResult
     economic_assessment: object | None
     economic_score: float
+    total_score: float
     ranking_score: float
 
 

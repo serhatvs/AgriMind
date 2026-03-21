@@ -74,6 +74,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from uuid import UUID
 
 from app.ai.contracts.metadata import AITraceMetadata
 from app.models.crop_profile import CropProfile
@@ -91,7 +92,7 @@ if TYPE_CHECKING:
 class YieldFieldSummary:
     """Normalized field attributes used by yield prediction providers."""
 
-    field_id: int | None
+    field_id: int | str | UUID | None
     name: str
     area_hectares: float
     slope_percent: float
@@ -107,7 +108,7 @@ class YieldFieldSummary:
 class YieldSoilSummary:
     """Normalized latest-soil attributes used by yield prediction providers."""
 
-    soil_test_id: int | None
+    soil_test_id: int | str | UUID | None
     ph: float | None
     ec: float | None
     organic_matter_percent: float | None
@@ -119,13 +120,15 @@ class YieldSoilSummary:
     texture_class: str | None
     drainage_class: str | None
     sample_date: datetime | None
+    calcium_ppm: float | None = None
+    magnesium_ppm: float | None = None
 
 
 @dataclass(slots=True)
 class YieldCropSummary:
     """Normalized crop requirements used by yield prediction providers."""
 
-    crop_id: int | None
+    crop_id: int | str | UUID | None
     crop_name: str
     water_requirement_level: str
     drainage_requirement: str
@@ -138,6 +141,10 @@ class YieldCropSummary:
     frost_tolerance_days: int | None
     heat_tolerance_days: int | None
     organic_matter_preference: str | None
+    ideal_ph_min: float | None = None
+    ideal_ph_max: float | None = None
+    frost_sensitivity: str | None = None
+    heat_sensitivity: str | None = None
 
 
 @dataclass(slots=True)
@@ -148,6 +155,12 @@ class YieldClimateSummary:
     total_rainfall: float | None
     frost_days: int | None
     heat_days: int | None
+    min_observed_temp: float | None = None
+    max_observed_temp: float | None = None
+    avg_humidity: float | None = None
+    avg_wind_speed: float | None = None
+    avg_solar_radiation: float | None = None
+    weather_record_count: int | None = None
 
 
 @dataclass(slots=True)
@@ -160,14 +173,39 @@ class YieldPredictionInput:
     climate: YieldClimateSummary | None
 
 
-@dataclass(slots=True)
+@dataclass(init=False, slots=True)
 class YieldPredictionOutput:
     """Canonical provider output for yield prediction."""
 
     predicted_yield: float
-    yield_range_min: float
-    yield_range_max: float
+    predicted_yield_min: float
+    predicted_yield_max: float
     metadata: AITraceMetadata
+    training_source: str | None = None
+
+    def __init__(
+        self,
+        *,
+        predicted_yield: float,
+        predicted_yield_min: float | None = None,
+        predicted_yield_max: float | None = None,
+        metadata: AITraceMetadata,
+        training_source: str | None = None,
+        yield_range_min: float | None = None,
+        yield_range_max: float | None = None,
+    ) -> None:
+        lower_bound = predicted_yield_min if predicted_yield_min is not None else yield_range_min
+        upper_bound = predicted_yield_max if predicted_yield_max is not None else yield_range_max
+        if lower_bound is None or upper_bound is None:
+            raise TypeError(
+                "YieldPredictionOutput requires predicted_yield_min/predicted_yield_max "
+                "or yield_range_min/yield_range_max."
+            )
+        self.predicted_yield = predicted_yield
+        self.predicted_yield_min = lower_bound
+        self.predicted_yield_max = upper_bound
+        self.metadata = metadata
+        self.training_source = training_source
 
     @property
     def confidence(self) -> float | None:
@@ -189,13 +227,25 @@ class YieldPredictionOutput:
     def debug_info(self) -> dict[str, object] | None:
         return self.metadata.debug_info
 
+    @property
+    def yield_range_min(self) -> float:
+        """Compatibility alias for the lower prediction bound."""
+
+        return self.predicted_yield_min
+
+    @property
+    def yield_range_max(self) -> float:
+        """Compatibility alias for the upper prediction bound."""
+
+        return self.predicted_yield_max
+
 
 @dataclass(slots=True)
 class YieldPredictionRequest:
     """Compatibility request identifying a persisted field/crop pairing."""
 
-    field_id: int
-    crop_id: int
+    field_id: int | str | UUID
+    crop_id: int | str | UUID
 
 
 @dataclass(slots=True)
@@ -283,13 +333,15 @@ def adapt_yield_prediction_output(
         field_id=input_data.field.field_id or 0,
         crop_id=input_data.crop.crop_id or 0,
         predicted_yield_per_hectare=round(max(output.predicted_yield, 0.0), 2),
+        predicted_yield_min=round(max(output.predicted_yield_min, 0.0), 2),
+        predicted_yield_max=round(max(output.predicted_yield_max, 0.0), 2),
         predicted_yield_range=YieldPredictionRange(
-            min=round(max(output.yield_range_min, 0.0), 2),
-            max=round(max(output.yield_range_max, 0.0), 2),
+            min=round(max(output.predicted_yield_min, 0.0), 2),
+            max=round(max(output.predicted_yield_max, 0.0), 2),
         ),
         confidence_score=round(min(max(output.confidence or 0.0, 0.0), 1.0), 2),
         model_version=output.provider_version or "unknown",
-        training_source=output.provider_name,
+        training_source=output.training_source or output.provider_name,
         feature_snapshot=feature_snapshot,
         metadata=adapt_trace_metadata(output.metadata),
     )
@@ -307,6 +359,8 @@ def _feature_snapshot_from_input(input_data: YieldPredictionInput) -> dict[str, 
         "nitrogen_ppm": soil.nitrogen_ppm if soil is not None else None,
         "phosphorus_ppm": soil.phosphorus_ppm if soil is not None else None,
         "potassium_ppm": soil.potassium_ppm if soil is not None else None,
+        "calcium_ppm": soil.calcium_ppm if soil is not None else None,
+        "magnesium_ppm": soil.magnesium_ppm if soil is not None else None,
         "soil_depth_cm": soil.depth_cm if soil is not None else None,
         "water_holding_capacity": soil.water_holding_capacity if soil is not None else None,
         "texture_class": soil.texture_class if soil is not None else None,
@@ -321,6 +375,10 @@ def _feature_snapshot_from_input(input_data: YieldPredictionInput) -> dict[str, 
         "aspect": input_data.field.aspect,
         "crop_water_requirement": input_data.crop.water_requirement_level,
         "crop_drainage_requirement": input_data.crop.drainage_requirement,
+        "crop_ideal_ph_min": input_data.crop.ideal_ph_min,
+        "crop_ideal_ph_max": input_data.crop.ideal_ph_max,
+        "crop_frost_sensitivity": input_data.crop.frost_sensitivity,
+        "crop_heat_sensitivity": input_data.crop.heat_sensitivity,
         "crop_salinity_tolerance": input_data.crop.salinity_tolerance,
         "crop_rooting_depth_cm": input_data.crop.rooting_depth_cm,
         "crop_slope_tolerance": input_data.crop.slope_tolerance,
@@ -331,9 +389,15 @@ def _feature_snapshot_from_input(input_data: YieldPredictionInput) -> dict[str, 
         "crop_heat_tolerance_days": input_data.crop.heat_tolerance_days,
         "crop_organic_matter_preference": input_data.crop.organic_matter_preference,
         "climate_avg_temp": climate.avg_temp if climate is not None else None,
+        "climate_min_observed_temp": climate.min_observed_temp if climate is not None else None,
+        "climate_max_observed_temp": climate.max_observed_temp if climate is not None else None,
         "climate_total_rainfall": climate.total_rainfall if climate is not None else None,
         "climate_frost_days": climate.frost_days if climate is not None else None,
         "climate_heat_days": climate.heat_days if climate is not None else None,
+        "climate_avg_humidity": climate.avg_humidity if climate is not None else None,
+        "climate_avg_wind_speed": climate.avg_wind_speed if climate is not None else None,
+        "climate_avg_solar_radiation": climate.avg_solar_radiation if climate is not None else None,
+        "climate_weather_record_count": climate.weather_record_count if climate is not None else None,
         "has_soil_test": soil is not None,
         "has_climate_summary": climate is not None,
     }

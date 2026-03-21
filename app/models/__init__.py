@@ -1,6 +1,7 @@
 """Register ORM model modules with the shared SQLAlchemy metadata."""
 
 from app.models import (
+    crop_economic_profile,
     crop_price,
     crop_profile,
     external_crop_statistics,
@@ -16,6 +17,7 @@ from app.models import (
 
 __all__ = [
     "crop_price",
+    "crop_economic_profile",
     "crop_profile",
     "external_crop_statistics",
     "feedback",

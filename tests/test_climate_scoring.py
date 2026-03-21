@@ -140,10 +140,10 @@ def test_missing_crop_climate_requirements_return_conservative_partial_score():
             frost_tolerance_days=None,
             heat_tolerance_days=None,
         ),
-        make_climate_summary(),
-        CONFIG,
-    )
+            make_climate_summary(),
+            CONFIG,
+        )
 
-    assert component.status is ScoreStatus.MISSING
-    assert 0 < component.awarded_points < component.max_points
-    assert "Crop temperature requirement is not configured." in component.reasons
+    assert component.status in {ScoreStatus.ACCEPTABLE, ScoreStatus.IDEAL}
+    assert 0 < component.awarded_points <= component.max_points
+    assert "Crop climate targets were inferred from AgriMind default crop benchmarks." in component.reasons

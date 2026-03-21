@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from uuid import UUID
 
@@ -62,6 +62,69 @@ class IngestionRepository:
         if data_source is None:
             raise NotFoundError(f"Data source with id {data_source_id} not found")
         return data_source
+
+    def count_running_ingestion_runs(self, *, data_source_id: UUID | None = None) -> int:
+        """Return the number of currently running ingestion runs."""
+
+        query = self.db.query(IngestionRun).filter(IngestionRun.status == IngestionRunStatus.RUNNING)
+        if data_source_id is not None:
+            query = query.filter(IngestionRun.data_source_id == data_source_id)
+        return query.count()
+
+    def count_stale_running_ingestion_runs(
+        self,
+        *,
+        data_source_id: UUID | None = None,
+        stale_run_minutes: int | None = None,
+    ) -> int:
+        """Return the number of stale running ingestion runs."""
+
+        stale_minutes = stale_run_minutes or settings.INGESTION_STALE_RUN_MINUTES
+        stale_before = utc_now() - timedelta(minutes=stale_minutes)
+        query = self.db.query(IngestionRun).filter(
+            IngestionRun.status == IngestionRunStatus.RUNNING,
+            IngestionRun.started_at.is_not(None),
+            IngestionRun.started_at < stale_before,
+        )
+        if data_source_id is not None:
+            query = query.filter(IngestionRun.data_source_id == data_source_id)
+        return query.count()
+
+    def mark_stale_running_runs(
+        self,
+        *,
+        data_source_id: UUID | None = None,
+        stale_run_minutes: int | None = None,
+        error_message: str = "Marked stale before fresh ingestion run.",
+    ) -> list[IngestionRun]:
+        """Mark stale running ingestion runs as failed before starting fresh work."""
+
+        stale_minutes = stale_run_minutes or settings.INGESTION_STALE_RUN_MINUTES
+        stale_before = utc_now() - timedelta(minutes=stale_minutes)
+        query = self.db.query(IngestionRun).filter(
+            IngestionRun.status == IngestionRunStatus.RUNNING,
+            IngestionRun.started_at.is_not(None),
+            IngestionRun.started_at < stale_before,
+        )
+        if data_source_id is not None:
+            query = query.filter(IngestionRun.data_source_id == data_source_id)
+
+        stale_runs = query.order_by(IngestionRun.started_at.asc()).all()
+        if not stale_runs:
+            return []
+
+        finished_at = utc_now()
+        for stale_run in stale_runs:
+            stale_run.status = IngestionRunStatus.FAILED
+            stale_run.finished_at = finished_at
+            stale_run.error_message = error_message
+
+        self._commit()
+        for stale_run in stale_runs:
+            self.db.refresh(stale_run)
+
+        logger.warning("Marked %s stale running ingestion run(s) as failed", len(stale_runs))
+        return stale_runs
 
     def get_data_source_by_name(self, source_name: str) -> DataSource | None:
         """Return a data source by source name when present."""

@@ -23,7 +23,7 @@ from app.ai.providers.rule_based.suitability import RuleBasedSuitabilityProvider
 from app.ai.providers.stub.explanation import DeterministicExplanationProvider
 from app.ai.providers.stub.extraction import StubExtractionProvider
 from app.ai.providers.stub.risk import StubRiskScorer
-from app.ai.providers.stub.yield_prediction import StubYieldPredictor
+from app.ai.providers.stub.yield_prediction import DeterministicYieldPredictor, StubYieldPredictor
 from app.config import Settings, settings
 
 ProviderFactory = Callable[..., Any]
@@ -68,9 +68,15 @@ class AIProviderRegistry:
             **(ranking_augmentation_factories or {}),
         }
         self._yield_factories = {
+            "deterministic": lambda **kwargs: DeterministicYieldPredictor(
+                model_dir=kwargs.get("model_dir"),
+            ),
             "xgboost": lambda **kwargs: XGBoostYieldPredictionProvider(
                 db=kwargs.get("db"),
                 model_dir=kwargs.get("model_dir"),
+                fallback_predictor=DeterministicYieldPredictor(
+                    model_dir=kwargs.get("model_dir"),
+                ),
             ),
             "stub": lambda **kwargs: StubYieldPredictor(
                 model_dir=kwargs.get("model_dir"),
@@ -175,7 +181,7 @@ class AIProviderRegistry:
             self.settings.AI_YIELD_PROVIDER,
             self._yield_factories,
             db=db,
-            model_dir=model_dir or self.settings.YIELD_MODEL_DIR,
+            model_dir=model_dir or self.settings.YIELD_MODEL_PATH,
         )
 
     def get_extraction_provider(self) -> ExtractionProvider:

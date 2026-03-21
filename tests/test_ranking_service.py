@@ -118,12 +118,15 @@ def test_get_ranked_fields_response_ranks_all_fields_when_no_filter(db):
     assert len(response.ranked_results) == 2
     assert response.schema_version == "ranking.v2"
     assert response.ranked_results[0].field_name == "Field Alpha"
-    assert response.ranked_results[0].agronomic_score == response.ranked_results[0].total_score
     assert response.ranked_results[0].estimated_profit is not None
+    assert response.ranked_results[0].estimated_revenue is not None
+    assert response.ranked_results[0].estimated_cost is not None
     assert response.ranked_results[0].predicted_yield is not None
+    assert response.ranked_results[0].predicted_yield_min is not None
+    assert response.ranked_results[0].predicted_yield_max is not None
     assert response.ranked_results[0].predicted_yield_range is not None
     assert response.ranked_results[0].confidence_score is not None
-    assert response.ranked_results[0].ranking_score >= response.ranked_results[0].total_score * 0.7
+    assert response.ranked_results[0].ranking_score == response.ranked_results[0].total_score
     assert response.ranked_results[0].metadata.provider_name == "rule_based"
     assert response.ranked_results[0].provider_metadata.explanation_provider.provider_name == "rule_based"
     assert response.ranked_results[0].explanation.short_explanation
@@ -199,6 +202,9 @@ def test_get_ranked_fields_response_uses_climate_summary_for_ranking(db):
 
     assert [entry.field_name for entry in response.ranked_results] == ["Climate Alpha", "Climate Beta"]
     assert "climate_compatibility" in response.ranked_results[0].breakdown
+    assert response.ranked_results[0].climate_score is not None
+    assert response.ranked_results[0].climate_strengths
+    assert response.ranked_results[1].climate_risks
     assert response.ranked_results[0].total_score > response.ranked_results[1].total_score
 
 

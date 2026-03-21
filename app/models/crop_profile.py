@@ -73,8 +73,32 @@ class CropProfile(TimestampMixin, Base):
             name="ck_crop_profiles_optimal_temp_order",
         ),
         CheckConstraint(
+            "tolerable_temp_min_c IS NULL OR tolerable_temp_max_c IS NULL OR tolerable_temp_min_c <= tolerable_temp_max_c",
+            name="ck_crop_profiles_tolerable_temp_order",
+        ),
+        CheckConstraint(
+            "optimal_temp_min_c IS NULL OR tolerable_temp_min_c IS NULL OR tolerable_temp_min_c <= optimal_temp_min_c",
+            name="ck_crop_profiles_tolerable_temp_min_not_above_optimal_min",
+        ),
+        CheckConstraint(
+            "optimal_temp_max_c IS NULL OR tolerable_temp_max_c IS NULL OR optimal_temp_max_c <= tolerable_temp_max_c",
+            name="ck_crop_profiles_optimal_temp_max_not_above_tolerable_max",
+        ),
+        CheckConstraint(
             "rainfall_requirement_mm IS NULL OR rainfall_requirement_mm >= 0",
             name="ck_crop_profiles_rainfall_requirement_non_negative",
+        ),
+        CheckConstraint(
+            "preferred_rainfall_min_mm IS NULL OR preferred_rainfall_min_mm >= 0",
+            name="ck_crop_profiles_preferred_rainfall_min_non_negative",
+        ),
+        CheckConstraint(
+            "preferred_rainfall_max_mm IS NULL OR preferred_rainfall_max_mm >= 0",
+            name="ck_crop_profiles_preferred_rainfall_max_non_negative",
+        ),
+        CheckConstraint(
+            "preferred_rainfall_min_mm IS NULL OR preferred_rainfall_max_mm IS NULL OR preferred_rainfall_min_mm <= preferred_rainfall_max_mm",
+            name="ck_crop_profiles_preferred_rainfall_order",
         ),
         CheckConstraint(
             "frost_tolerance_days IS NULL OR frost_tolerance_days >= 0",
@@ -154,7 +178,11 @@ class CropProfile(TimestampMixin, Base):
     slope_tolerance: Mapped[float | None] = mapped_column(Float, nullable=True)
     optimal_temp_min_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     optimal_temp_max_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tolerable_temp_min_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tolerable_temp_max_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     rainfall_requirement_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    preferred_rainfall_min_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    preferred_rainfall_max_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
     frost_tolerance_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     heat_tolerance_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     target_nitrogen_ppm: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -279,6 +307,42 @@ class CropProfile(TimestampMixin, Base):
         """Compatibility alias for the crop rainfall target."""
 
         return self.rainfall_requirement_mm
+
+    @property
+    def optimal_temp_min(self) -> float | None:
+        """Compatibility alias for the crop's preferred minimum average temperature."""
+
+        return self.optimal_temp_min_c
+
+    @property
+    def optimal_temp_max(self) -> float | None:
+        """Compatibility alias for the crop's preferred maximum average temperature."""
+
+        return self.optimal_temp_max_c
+
+    @property
+    def tolerable_temp_min(self) -> float | None:
+        """Compatibility alias for the crop's tolerable minimum average temperature."""
+
+        return self.tolerable_temp_min_c
+
+    @property
+    def tolerable_temp_max(self) -> float | None:
+        """Compatibility alias for the crop's tolerable maximum average temperature."""
+
+        return self.tolerable_temp_max_c
+
+    @property
+    def preferred_rainfall_min(self) -> float | None:
+        """Compatibility alias for the crop's preferred minimum lookback rainfall."""
+
+        return self.preferred_rainfall_min_mm
+
+    @property
+    def preferred_rainfall_max(self) -> float | None:
+        """Compatibility alias for the crop's preferred maximum lookback rainfall."""
+
+        return self.preferred_rainfall_max_mm
 
     @property
     def frost_tolerance(self) -> int | None:

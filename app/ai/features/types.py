@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import UUID
 
 from app.models.crop_profile import CropProfile
 from app.models.field import Field
@@ -15,7 +16,7 @@ from app.schemas.weather_history import ClimateSummary
 class FieldFeatureSummary:
     """Normalized field summary shared across AI feature builders."""
 
-    field_id: int | None
+    field_id: int | str | UUID | None
     name: str
     area_hectares: float | None
     slope_percent: float | None
@@ -31,13 +32,15 @@ class FieldFeatureSummary:
 class SoilFeatureSummary:
     """Normalized latest-soil summary shared across AI feature builders."""
 
-    soil_test_id: int | None
+    soil_test_id: int | str | UUID | None
     ph: float | None
     ec: float | None
     organic_matter_percent: float | None
     nitrogen_ppm: float | None
     phosphorus_ppm: float | None
     potassium_ppm: float | None
+    calcium_ppm: float | None
+    magnesium_ppm: float | None
     depth_cm: float | None
     water_holding_capacity: float | None
     texture_class: str | None
@@ -49,10 +52,14 @@ class SoilFeatureSummary:
 class CropFeatureSummary:
     """Normalized crop summary shared across AI feature builders."""
 
-    crop_id: int | None
+    crop_id: int | str | UUID | None
     crop_name: str
+    ideal_ph_min: float | None
+    ideal_ph_max: float | None
     water_requirement_level: str | None
     drainage_requirement: str | None
+    frost_sensitivity: str | None
+    heat_sensitivity: str | None
     salinity_tolerance: str | None
     rooting_depth_cm: float | None
     slope_tolerance: float | None
@@ -62,6 +69,10 @@ class CropFeatureSummary:
     frost_tolerance_days: int | None
     heat_tolerance_days: int | None
     organic_matter_preference: str | None
+    tolerable_temp_min_c: float | None = None
+    tolerable_temp_max_c: float | None = None
+    preferred_rainfall_min_mm: float | None = None
+    preferred_rainfall_max_mm: float | None = None
 
 
 @dataclass(slots=True)
@@ -72,6 +83,14 @@ class ClimateFeatureSummary:
     total_rainfall: float | None
     frost_days: int | None
     heat_days: int | None
+    min_observed_temp: float | None = None
+    max_observed_temp: float | None = None
+    avg_humidity: float | None = None
+    avg_wind_speed: float | None = None
+    avg_solar_radiation: float | None = None
+    weather_record_count: int | None = None
+    lookback_days: int | None = None
+    coverage_ratio: float | None = None
 
 
 @dataclass(slots=True)

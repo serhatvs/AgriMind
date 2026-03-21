@@ -12,7 +12,7 @@ from app.ai.providers.rule_based.suitability import RuleBasedSuitabilityProvider
 from app.ai.providers.stub.explanation import DeterministicExplanationProvider
 from app.ai.providers.stub.extraction import StubExtractionProvider
 from app.ai.providers.stub.risk import StubRiskScorer
-from app.ai.providers.stub.yield_prediction import StubYieldPredictor
+from app.ai.providers.stub.yield_prediction import DeterministicYieldPredictor, StubYieldPredictor
 from app.ai.registry import AIProviderRegistry
 from app.config import Settings, settings
 
@@ -100,10 +100,22 @@ def test_ai_registry_fails_fast_for_unknown_canonical_provider_ids(
 def test_ai_registry_lists_registered_provider_ids():
     registry = AIProviderRegistry(settings)
 
-    assert registry.available_provider_ids("yield") == ("stub", "xgboost")
+    assert registry.available_provider_ids("yield") == ("deterministic", "stub", "xgboost")
     assert registry.available_provider_ids("explanation") == ("deterministic", "rule_based")
     assert registry.available_provider_ids("risk") == ("rule_based", "stub")
     assert registry.available_provider_ids("extraction") == ("rule_based", "stub")
+
+
+def test_ai_registry_supports_deterministic_yield_provider_alias():
+    config = Settings(
+        _env_file=None,
+        YIELD_PROVIDER="deterministic",
+        OPENAI_API_KEY=None,
+    )
+
+    registry = AIProviderRegistry(config)
+
+    assert isinstance(registry.get_yield_prediction_provider(db=None), DeterministicYieldPredictor)
 
 
 def test_main_lifespan_validates_ai_provider_configuration(monkeypatch):

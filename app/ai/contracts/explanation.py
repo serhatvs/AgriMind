@@ -130,6 +130,10 @@ class ExplanationEconomicMetadata:
 
     strengths: list[str] = field(default_factory=list)
     weaknesses: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    estimated_revenue: float | None = None
+    estimated_cost: float | None = None
+    estimated_profit: float | None = None
 
 
 @dataclass(slots=True)
@@ -207,6 +211,7 @@ class RankedExplanationRequest:
     penalties: list[ScorePenalty]
     economic_strengths: list[str] = field(default_factory=list)
     economic_weaknesses: list[str] = field(default_factory=list)
+    economic_risks: list[str] = field(default_factory=list)
     yield_metadata: ExplanationYieldMetadata | None = None
     risk_metadata: ExplanationRiskMetadata | None = None
     economic_metadata: ExplanationEconomicMetadata | None = None
@@ -281,6 +286,7 @@ def build_explanation_input_from_ranked_request(
             request.economic_metadata,
             request.economic_strengths,
             request.economic_weaknesses,
+            request.economic_risks,
         ),
         feature_context=request.feature_context,
     )
@@ -342,6 +348,7 @@ def _merge_economic_metadata(
     metadata: ExplanationEconomicMetadata | None,
     strengths: list[str],
     weaknesses: list[str],
+    risks: list[str] | None = None,
 ) -> ExplanationEconomicMetadata | None:
     merged_strengths = _dedupe_messages(
         [*(metadata.strengths if metadata is not None else []), *strengths]
@@ -349,13 +356,20 @@ def _merge_economic_metadata(
     merged_weaknesses = _dedupe_messages(
         [*(metadata.weaknesses if metadata is not None else []), *weaknesses]
     )
+    merged_risks = _dedupe_messages(
+        [*(metadata.risks if metadata is not None else []), *((risks or []))]
+    )
 
-    if not merged_strengths and not merged_weaknesses:
+    if not merged_strengths and not merged_weaknesses and not merged_risks:
         return metadata
 
     return ExplanationEconomicMetadata(
         strengths=merged_strengths,
         weaknesses=merged_weaknesses,
+        risks=merged_risks,
+        estimated_revenue=metadata.estimated_revenue if metadata is not None else None,
+        estimated_cost=metadata.estimated_cost if metadata is not None else None,
+        estimated_profit=metadata.estimated_profit if metadata is not None else None,
     )
 
 

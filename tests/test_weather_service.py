@@ -99,7 +99,7 @@ def test_get_climate_summary_computes_expected_metrics(db):
     db.commit()
 
     service = WeatherService(db)
-    summary = service.get_climate_summary(field.id)
+    summary = service.get_climate_summary(field.id, days=365)
 
     assert summary is not None
     assert summary.avg_temp == 16.0

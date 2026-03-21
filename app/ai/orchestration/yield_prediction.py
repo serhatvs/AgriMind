@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -52,7 +53,11 @@ class YieldPredictionOrchestrator:
         input_data = build_yield_prediction_input_from_context(request)
         return adapt_yield_prediction_output(input_data, self.predict(input_data))
 
-    def predict_yield(self, field_id: int, crop_id: int) -> YieldPredictionResult:
+    def predict_yield(
+        self,
+        field_id: int | str | UUID,
+        crop_id: int | str | UUID,
+    ) -> YieldPredictionResult:
         """Predict expected yield for a persisted field and crop combination."""
 
         if self.db is None:
@@ -87,6 +92,7 @@ class YieldPredictionOrchestrator:
         random_seed: int = 20260319,
         save: bool = True,
         force: bool = False,
+        min_real_samples: int | None = None,
     ) -> object:
         """Train or refresh the underlying yield model."""
 
@@ -96,4 +102,5 @@ class YieldPredictionOrchestrator:
             random_seed=random_seed,
             save=save,
             force=force,
+            min_real_samples=min_real_samples,
         )

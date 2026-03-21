@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date as date_type
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -16,7 +17,7 @@ class WeatherHistoryBase(BaseModel):
         from_attributes=True,
     )
 
-    field_id: int | None = Field(default=None, gt=0)
+    field_id: int | str | UUID | None = Field(default=None)
     date: date_type | None = None
     min_temp: float | None = None
     max_temp: float | None = None
@@ -41,7 +42,7 @@ class WeatherHistoryBase(BaseModel):
 class WeatherHistoryCreate(WeatherHistoryBase):
     """Schema used when creating a weather history record."""
 
-    field_id: int = Field(..., gt=0)
+    field_id: int | str | UUID
     date: date_type
     min_temp: float
     max_temp: float
@@ -57,7 +58,7 @@ class WeatherHistoryRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    field_id: int
+    field_id: int | str | UUID
     date: date_type
     min_temp: float
     max_temp: float
@@ -73,7 +74,19 @@ class WeatherHistoryRead(BaseModel):
 class ClimateSummary(BaseModel):
     """Aggregated climate metrics for a field over a recent time window."""
 
-    avg_temp: float
-    total_rainfall: float
-    frost_days: int
-    heat_days: int
+    model_config = ConfigDict(extra="forbid")
+
+    avg_temp: float | None = None
+    min_observed_temp: float | None = None
+    max_observed_temp: float | None = None
+    total_rainfall: float | None = None
+    avg_humidity: float | None = None
+    avg_wind_speed: float | None = None
+    avg_solar_radiation: float | None = None
+    frost_days: int = 0
+    heat_days: int = 0
+    weather_record_count: int = 0
+    lookback_days: int | None = None
+    observation_start_date: date_type | None = None
+    observation_end_date: date_type | None = None
+    coverage_ratio: float | None = Field(default=None, ge=0, le=1)

@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.ai.contracts.metadata import AITraceMetadata
 from app.ai.contracts.yield_prediction import YieldPredictionInput, YieldPredictionOutput, YieldPredictor
+from app.ai.training.yield_dataset import build_yield_training_dataset
 from app.config import settings
-from app.ml.mock_training_data import build_mock_crop_profiles, generate_mock_training_samples
 from app.ml.yield_pipeline import YieldFeatureBundle, YieldPredictionPipeline
-from app.services.crop_service import get_crops
+from app.ai.providers.stub.yield_prediction import DeterministicYieldPredictor
 
 _PIPELINE_CACHE: dict[str, YieldPredictionPipeline] = {}
 
@@ -19,7 +21,8 @@ _PIPELINE_CACHE: dict[str, YieldPredictionPipeline] = {}
 def default_model_dir() -> Path:
     """Return the default yield-model artifact directory."""
 
-    return Path(settings.YIELD_MODEL_DIR)
+    configured_path = Path(settings.YIELD_MODEL_PATH)
+    return configured_path.parent if configured_path.suffix else configured_path
 
 
 class XGBoostYieldPredictionProvider(YieldPredictor):
@@ -30,9 +33,16 @@ class XGBoostYieldPredictionProvider(YieldPredictor):
         db: Session | None,
         *,
         model_dir: str | Path | None = None,
+        fallback_predictor: YieldPredictor | None = None,
     ) -> None:
         self.db = db
-        self._model_dir = Path(model_dir) if model_dir is not None else default_model_dir()
+        resolved_dir = Path(model_dir) if model_dir is not None else default_model_dir()
+        if resolved_dir.suffix:
+            resolved_dir = resolved_dir.parent
+        self._model_dir = resolved_dir
+        self._fallback_predictor = fallback_predictor or DeterministicYieldPredictor(
+            model_dir=self._model_dir / "deterministic_fallback"
+        )
 
     @property
     def model_dir(self) -> Path:
@@ -41,9 +51,23 @@ class XGBoostYieldPredictionProvider(YieldPredictor):
     def predict(self, request: YieldPredictionInput) -> YieldPredictionOutput:
         """Predict yield from the canonical yield-prediction input."""
 
-        pipeline = self._get_or_train_pipeline()
+        pipeline = self._get_pipeline()
+        if pipeline is None:
+            return self._fallback_prediction(
+                request,
+                reason=(
+                    "Yield model artifact was not found or could not be loaded; "
+                    "used deterministic fallback."
+                ),
+            )
         features = YieldFeatureBundle.from_prediction_input(request)
-        return pipeline.predict(features)
+        try:
+            return pipeline.predict(features)
+        except Exception:
+            return self._fallback_prediction(
+                request,
+                reason="Yield model inference failed; used deterministic fallback.",
+            )
 
     def train_model(
         self,
@@ -52,6 +76,7 @@ class XGBoostYieldPredictionProvider(YieldPredictor):
         random_seed: int = 20260319,
         save: bool = True,
         force: bool = False,
+        min_real_samples: int | None = None,
     ) -> YieldPredictionPipeline:
         """Train the yield model from deterministic synthetic training data."""
 
@@ -59,15 +84,15 @@ class XGBoostYieldPredictionProvider(YieldPredictor):
         if not force and cache_key in _PIPELINE_CACHE:
             return _PIPELINE_CACHE[cache_key]
 
-        crop_profiles = self._load_reference_crops()
-        samples = generate_mock_training_samples(
-            crop_profiles=crop_profiles,
-            sample_count=sample_count,
+        dataset_bundle = build_yield_training_dataset(
+            self.db,
+            target_sample_count=sample_count,
             random_seed=random_seed,
+            min_real_samples=min_real_samples,
         )
         pipeline = YieldPredictionPipeline().fit(
-            samples,
-            training_source="synthetic_mock_data",
+            dataset_bundle.samples,
+            training_source=dataset_bundle.source_name,
             random_seed=random_seed,
         )
         if save:
@@ -75,7 +100,7 @@ class XGBoostYieldPredictionProvider(YieldPredictor):
         _PIPELINE_CACHE[cache_key] = pipeline
         return pipeline
 
-    def _get_or_train_pipeline(self) -> YieldPredictionPipeline:
+    def _get_pipeline(self) -> YieldPredictionPipeline | None:
         cache_key = str(self.model_dir.resolve())
         cached = _PIPELINE_CACHE.get(cache_key)
         if cached is not None:
@@ -84,17 +109,34 @@ class XGBoostYieldPredictionProvider(YieldPredictor):
         model_path = self.model_dir / "yield_model.json"
         metadata_path = self.model_dir / "yield_model_metadata.json"
         if model_path.exists() and metadata_path.exists():
-            pipeline = YieldPredictionPipeline.load(self.model_dir)
+            try:
+                pipeline = YieldPredictionPipeline.load(self.model_dir)
+            except (FileNotFoundError, RuntimeError, SQLAlchemyError, ValueError):
+                return None
             _PIPELINE_CACHE[cache_key] = pipeline
             return pipeline
+        return None
 
-        return self.train_model(save=False)
-
-    def _load_reference_crops(self):
-        if self.db is None:
-            return build_mock_crop_profiles()
-        try:
-            crops = get_crops(self.db, skip=0, limit=1000)
-        except SQLAlchemyError:
-            return build_mock_crop_profiles()
-        return crops or build_mock_crop_profiles()
+    def _fallback_prediction(
+        self,
+        request: YieldPredictionInput,
+        *,
+        reason: str,
+    ) -> YieldPredictionOutput:
+        output = self._fallback_predictor.predict(request)
+        normalized_metadata = output.metadata.normalized()
+        debug_info = {
+            **(normalized_metadata.debug_info or {}),
+            "fallback_reason": reason,
+            "requested_provider": "xgboost_yield_prediction",
+        }
+        return replace(
+            output,
+            metadata=AITraceMetadata(
+                provider_name=normalized_metadata.provider_name,
+                provider_version=normalized_metadata.provider_version,
+                generated_at=normalized_metadata.generated_at,
+                confidence=normalized_metadata.confidence,
+                debug_info=debug_info,
+            ),
+        )

@@ -180,9 +180,25 @@ def _build_short_explanation(
     blockers: list[ExplanationBlocker],
 ) -> str:
     label = _suitability_label(display_score, blockers)
+    economic_strength = next(
+        (message for message in strengths if "profit" in message.lower() or "market price" in message.lower()),
+        None,
+    )
+    economic_weakness = next(
+        (
+            message
+            for message in weaknesses
+            if "profit" in message.lower() or "market price" in message.lower() or "cost" in message.lower()
+        ),
+        None,
+    )
 
     if blockers and risks:
         return _as_sentence(f"This field is {label} because {_join_clauses(risks[:2])}")
+    if display_score >= 80 and economic_strength:
+        return _as_sentence(economic_strength)
+    if economic_weakness and display_score < 70:
+        return _as_sentence(economic_weakness)
 
     if display_score >= 80 and strengths:
         return _as_sentence(f"This field ranked highly because {_join_clauses(strengths[:2])}")
@@ -316,9 +332,14 @@ class RuleBasedExplanationProvider(ExplanationProvider):
                 else []
             ),
             precomputed_risks=(
-                list(request.risk_metadata.risks)
-                if request.risk_metadata is not None
-                else []
+                [
+                    *(list(request.risk_metadata.risks) if request.risk_metadata is not None else []),
+                    *(
+                        list(request.economic_metadata.risks)
+                        if request.economic_metadata is not None
+                        else []
+                    ),
+                ]
             ),
         )
 

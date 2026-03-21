@@ -158,9 +158,17 @@ def test_assemble_feature_bundle_uses_latest_soil_and_optional_climate(db):
     assert bundle.soil_test.ph == 5.2
     assert bundle.summary.soil is not None
     assert bundle.summary.soil.ph == 5.2
+    assert bundle.summary.soil.calcium_ppm == 1700.0
+    assert bundle.summary.soil.magnesium_ppm == 220.0
     assert bundle.summary.climate is not None
     assert bundle.summary.climate.avg_temp == 19.0
+    assert bundle.summary.climate.min_observed_temp == 11.0
+    assert bundle.summary.climate.max_observed_temp == 27.0
     assert bundle.summary.climate.total_rainfall == 203.0
+    assert bundle.summary.climate.avg_humidity == 56.0
+    assert bundle.summary.climate.avg_wind_speed == 3.8
+    assert bundle.summary.climate.avg_solar_radiation == 18.0
+    assert bundle.summary.climate.weather_record_count == 14
 
 
 def test_assemble_feature_bundle_returns_normalized_summary_types(db):
@@ -197,6 +205,12 @@ def test_build_yield_prediction_input_matches_entity_mapping_and_handles_missing
 
     assert built == manual
     assert built.soil is not None
+    assert built.soil.calcium_ppm == 1700.0
+    assert built.soil.magnesium_ppm == 220.0
+    assert built.crop.ideal_ph_min == 6.0
+    assert built.crop.ideal_ph_max == 6.8
+    assert built.crop.frost_sensitivity == "high"
+    assert built.crop.heat_sensitivity == "medium"
     assert built.climate is None
 
 

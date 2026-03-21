@@ -32,6 +32,7 @@ from app.services.errors import NotFoundError, ServiceValidationError
 from app.services.field_service import get_all_fields, get_fields_by_ids
 from app.services.soil_service import get_latest_soil_test_for_field
 from app.services.weather_service import WeatherService
+from app.services.yield_prediction_service import YieldPredictionService
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -74,7 +75,7 @@ def _supports_provider_backed_ranking(db: Session) -> bool:
     """Return whether the full ORM-backed ranking stack is available on this schema."""
 
     return (
-        tables_exist(db, "fields", "crop_profiles", "soil_tests", "weather_history", "crop_prices", "input_costs")
+        tables_exist(db, "fields", "crop_profiles", "soil_tests", "weather_history")
         and table_has_columns(db, "fields", "drainage_quality")
         and table_has_columns(
             db,
@@ -125,7 +126,11 @@ def _build_fallback_crop_proxy(crop_row: Mapping[str, Any]) -> SimpleNamespace:
         slope_tolerance=_coerce_float(crop_row.get("slope_tolerance")),
         optimal_temp_min_c=_coerce_float(crop_row.get("optimal_temp_min_c")),
         optimal_temp_max_c=_coerce_float(crop_row.get("optimal_temp_max_c")),
+        tolerable_temp_min_c=_coerce_float(crop_row.get("tolerable_temp_min_c")),
+        tolerable_temp_max_c=_coerce_float(crop_row.get("tolerable_temp_max_c")),
         rainfall_requirement_mm=_coerce_float(crop_row.get("rainfall_requirement_mm")),
+        preferred_rainfall_min_mm=_coerce_float(crop_row.get("preferred_rainfall_min_mm")),
+        preferred_rainfall_max_mm=_coerce_float(crop_row.get("preferred_rainfall_max_mm")),
         frost_tolerance_days=_coerce_int(crop_row.get("frost_tolerance_days")),
         heat_tolerance_days=_coerce_int(crop_row.get("heat_tolerance_days")),
         organic_matter_preference=crop_row.get("organic_matter_preference"),
@@ -271,6 +276,34 @@ def _get_ranked_fields_response_fallback(
         field_row["id"]: _build_fallback_soil_proxy(latest_soil_rows.get(field_row["id"]))
         for field_row in field_rows
     }
+    climate_lookup = None
+    if tables_exist(db, "weather_history"):
+        weather_service = WeatherService(db)
+        climate_lookup = {
+            field_row["id"]: weather_service.get_climate_summary(field_row["id"])
+            for field_row in field_rows
+        }
+    yield_service = YieldPredictionService(db)
+    yield_lookup = {
+        field_row["id"]: yield_service.predict_for_entities(
+            field_proxies[index],
+            crop,
+            soil_test=soil_lookup[field_row["id"]],
+            climate_summary=(climate_lookup or {}).get(field_row["id"]),
+        )
+        for index, field_row in enumerate(field_rows)
+    }
+    economic_service = EconomicService(db)
+    economic_lookup = {
+        field_row["id"]: economic_service.calculate_profit(
+            field_proxies[index],
+            crop,
+            soil_test=soil_lookup[field_row["id"]],
+            climate_summary=(climate_lookup or {}).get(field_row["id"]),
+            yield_prediction=yield_lookup[field_row["id"]],
+        )
+        for index, field_row in enumerate(field_rows)
+    }
 
     registry = get_ai_provider_registry()
     explanation_provider = registry.get_explanation_provider()
@@ -282,6 +315,9 @@ def _get_ranked_fields_response_fallback(
         crop,
         soil_lookup,
         top_n=top_n,
+        climate_summaries=climate_lookup,
+        economic_assessments=economic_lookup,
+        yield_predictions=yield_lookup,
     )
 
     return RankFieldsResponse(
@@ -366,8 +402,13 @@ def _serialize_provider_metadata(
                 provider_name=registry.settings.AI_SUITABILITY_PROVIDER,
                 provider_version=None,
                 generated_at=generated_at,
-                confidence=None,
-                debug_info={"total_score": entry.agronomic_score},
+                confidence=entry.result.confidence_score,
+                debug_info={
+                    "agronomic_score": entry.agronomic_score,
+                    "climate_score": entry.climate_score,
+                    "economic_score": entry.economic_score,
+                    "total_score": entry.total_score,
+                },
             )
         ),
         ranking_provider=_serialize_trace_metadata(
@@ -379,6 +420,9 @@ def _serialize_provider_metadata(
                 debug_info={
                     "ranking_score": entry.ranking_score,
                     "economic_score": entry.economic_score,
+                    "estimated_revenue": entry.estimated_revenue,
+                    "estimated_cost": entry.estimated_cost,
+                    "estimated_profit": entry.estimated_profit,
                 },
             )
         ),
@@ -386,11 +430,14 @@ def _serialize_provider_metadata(
         yield_provider=(
             _serialize_trace_metadata(
                 AITraceMetadata(
-                    provider_name=yield_prediction.training_source,
+                    provider_name=yield_prediction.metadata.provider_name,
                     provider_version=yield_prediction.model_version,
                     generated_at=yield_prediction.metadata.generated_at,
                     confidence=yield_prediction.confidence_score,
-                    debug_info=yield_prediction.metadata.debug_info,
+                    debug_info={
+                        **(yield_prediction.metadata.debug_info or {}),
+                        "training_source": yield_prediction.training_source,
+                    },
                 )
             )
             if yield_prediction is not None
@@ -425,6 +472,8 @@ def _serialize_ranking_metadata(
                 "agronomic_provider": registry.settings.AI_SUITABILITY_PROVIDER,
                 "explanation_provider": explanation_output.provider_name,
                 "has_yield_prediction": entry.yield_prediction is not None,
+                "climate_score": entry.climate_score,
+                "economic_score": entry.economic_score,
             },
         )
     )
@@ -447,13 +496,21 @@ def _serialize_ranked_result(
         economic_score=entry.economic_score,
         risk_score=entry.risk_score,
         confidence_score=entry.confidence_score,
+        estimated_revenue=entry.estimated_revenue,
+        estimated_cost=entry.estimated_cost,
         estimated_profit=entry.estimated_profit,
         predicted_yield=entry.predicted_yield,
+        predicted_yield_min=entry.predicted_yield_min,
+        predicted_yield_max=entry.predicted_yield_max,
         predicted_yield_range=entry.predicted_yield_range,
         ranking_score=entry.ranking_score,
         strengths=explanation_output.strengths,
         weaknesses=explanation_output.weaknesses,
         risks=explanation_output.risks,
+        climate_reasons=entry.climate_reasons,
+        climate_strengths=entry.climate_strengths,
+        climate_weaknesses=entry.climate_weaknesses,
+        climate_risks=entry.climate_risks,
         breakdown=_serialize_breakdown(entry.breakdown),
         blockers=_serialize_blockers(entry.blockers),
         reasons=entry.reasons,
@@ -512,6 +569,16 @@ def get_ranked_fields_response(
         field.id: weather_service.get_climate_summary(field.id)
         for field in fields
     }
+    yield_service = YieldPredictionService(db)
+    yield_lookup = {
+        field.id: yield_service.predict_for_entities(
+            field,
+            crop,
+            soil_test=soil_lookup[field.id],
+            climate_summary=climate_lookup[field.id],
+        )
+        for field in fields
+    }
     economic_service = EconomicService(db)
     economic_lookup = {
         field.id: economic_service.calculate_profit(
@@ -519,6 +586,7 @@ def get_ranked_fields_response(
             crop,
             soil_test=soil_lookup[field.id],
             climate_summary=climate_lookup[field.id],
+            yield_prediction=yield_lookup[field.id],
         )
         for field in fields
     }
@@ -534,6 +602,7 @@ def get_ranked_fields_response(
         top_n=top_n,
         climate_summaries=climate_lookup,
         economic_assessments=economic_lookup,
+        yield_predictions=yield_lookup,
     )
 
     return RankFieldsResponse(

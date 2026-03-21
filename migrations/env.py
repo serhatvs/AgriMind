@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.config import settings
 from app.database import Base
-from app.models import crop_price, crop_profile, external_crop_statistics, feedback, field, field_crop_cycle, ingestion, input_cost, recommendation, soil_test, weather_history  # noqa
+from app.models import crop_economic_profile, crop_price, crop_profile, external_crop_statistics, feedback, field, field_crop_cycle, ingestion, input_cost, recommendation, soil_test, weather_history  # noqa
 
 config = context.config
 legacy_database_url = "postgresql://postgres:postgres@localhost:5432/agrimind"

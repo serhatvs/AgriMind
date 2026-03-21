@@ -44,6 +44,23 @@ class CropSeedSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class CropEconomicProfileSeedSpec:
+    """Economic assumptions used to exercise profitability-aware ranking."""
+
+    crop_slug: str
+    crop_name: str
+    average_market_price_per_unit: float
+    price_unit: str
+    base_cost_per_hectare: float
+    irrigation_cost_factor: float
+    fertilizer_cost_factor: float
+    labor_cost_factor: float
+    risk_cost_factor: float
+    region: str | None
+    description: str
+
+
+@dataclass(frozen=True, slots=True)
 class FieldSeedSpec:
     """Field payload tuned to exercise different ranking outcomes."""
 
@@ -120,6 +137,7 @@ class SeedDataset:
     """Bundle of all deterministic demo seed definitions."""
 
     crops: tuple[CropSeedSpec, ...]
+    economic_profiles: tuple[CropEconomicProfileSeedSpec, ...]
     fields: tuple[FieldSeedSpec, ...]
     soils: tuple[SoilSeedSpec, ...]
     weather: tuple[WeatherSeedSpec, ...]
@@ -385,6 +403,78 @@ def build_field_specs() -> tuple[FieldSeedSpec, ...]:
             infrastructure_score=65.0,
             weather_profile="intermountain",
             description="Rolling inland bench that creates a balanced mid-suitability reference parcel.",
+        ),
+    )
+
+
+def build_crop_economic_profile_specs() -> tuple[CropEconomicProfileSeedSpec, ...]:
+    """Return demo crop economics for profitability-aware ranking."""
+
+    return (
+        CropEconomicProfileSeedSpec(
+            crop_slug="blackberry",
+            crop_name="Blackberry",
+            average_market_price_per_unit=1850.0,
+            price_unit="ton",
+            base_cost_per_hectare=5200.0,
+            irrigation_cost_factor=0.14,
+            fertilizer_cost_factor=0.12,
+            labor_cost_factor=0.28,
+            risk_cost_factor=0.08,
+            region=None,
+            description="High-value berry economics with elevated labor intensity.",
+        ),
+        CropEconomicProfileSeedSpec(
+            crop_slug="corn",
+            crop_name="Corn",
+            average_market_price_per_unit=210.0,
+            price_unit="ton",
+            base_cost_per_hectare=360.0,
+            irrigation_cost_factor=0.18,
+            fertilizer_cost_factor=0.22,
+            labor_cost_factor=0.11,
+            risk_cost_factor=0.06,
+            region=None,
+            description="Irrigated row-crop economics for high-yield grain production.",
+        ),
+        CropEconomicProfileSeedSpec(
+            crop_slug="wheat",
+            crop_name="Wheat",
+            average_market_price_per_unit=285.0,
+            price_unit="ton",
+            base_cost_per_hectare=245.0,
+            irrigation_cost_factor=0.08,
+            fertilizer_cost_factor=0.16,
+            labor_cost_factor=0.10,
+            risk_cost_factor=0.05,
+            region=None,
+            description="Moderate-cost cereal economics with stable market assumptions.",
+        ),
+        CropEconomicProfileSeedSpec(
+            crop_slug="sunflower",
+            crop_name="Sunflower",
+            average_market_price_per_unit=460.0,
+            price_unit="ton",
+            base_cost_per_hectare=225.0,
+            irrigation_cost_factor=0.05,
+            fertilizer_cost_factor=0.14,
+            labor_cost_factor=0.09,
+            risk_cost_factor=0.07,
+            region=None,
+            description="Lower-input oilseed economics suited to drier ground.",
+        ),
+        CropEconomicProfileSeedSpec(
+            crop_slug="chickpea",
+            crop_name="Chickpea",
+            average_market_price_per_unit=610.0,
+            price_unit="ton",
+            base_cost_per_hectare=260.0,
+            irrigation_cost_factor=0.06,
+            fertilizer_cost_factor=0.10,
+            labor_cost_factor=0.12,
+            risk_cost_factor=0.06,
+            region=None,
+            description="Pulse economics with favorable price support and moderate risk load.",
         ),
     )
 
@@ -691,7 +781,14 @@ def build_seed_dataset() -> SeedDataset:
     """Return the complete deterministic dataset for the demo seed."""
 
     crops = build_crop_specs()
+    economic_profiles = build_crop_economic_profile_specs()
     fields = build_field_specs()
     soils = build_soil_specs()
     weather = build_weather_specs(fields)
-    return SeedDataset(crops=crops, fields=fields, soils=soils, weather=weather)
+    return SeedDataset(
+        crops=crops,
+        economic_profiles=economic_profiles,
+        fields=fields,
+        soils=soils,
+        weather=weather,
+    )

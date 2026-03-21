@@ -17,13 +17,18 @@ print(climate_summary.avg_temp if climate_summary else None)
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Protocol, Sequence
+from typing import Any, Protocol, Sequence
+from uuid import UUID
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
+from app.db.reflection import reflect_tables, table_has_columns
 from app.models.field import Field
 from app.models.weather_history import WeatherHistory
 from app.schemas.weather_history import ClimateSummary, WeatherHistoryCreate
+from app.services.climate_feature_builder import ClimateFeatureBuilder
 
 
 class WeatherProvider(Protocol):
@@ -112,26 +117,64 @@ class WeatherService:
 
     def get_climate_summary(
         self,
-        field_id: int,
-        days: int = 365,
-        heat_threshold_c: float = 35.0,
+        field_id: int | str | UUID,
+        days: int | None = None,
+        heat_threshold_c: float | None = None,
     ) -> ClimateSummary | None:
         """Return an aggregated climate summary anchored to the latest stored field date."""
 
-        recent_weather = self.get_recent_weather(field_id, days=days)
-        if not recent_weather:
+        resolved_days = days or settings.CLIMATE_LOOKBACK_DAYS
+        resolved_heat_threshold = heat_threshold_c or settings.HEAT_DAY_THRESHOLD
+        builder = ClimateFeatureBuilder()
+
+        if self._supports_orm_weather_service():
+            recent_weather = self.get_recent_weather(int(field_id), days=resolved_days)
+            observations = [
+                builder.observation_from_mapping(
+                    {
+                        "date": record.date,
+                        "min_temp": record.min_temp,
+                        "max_temp": record.max_temp,
+                        "avg_temp": record.avg_temp,
+                        "rainfall_mm": record.rainfall_mm,
+                        "humidity": record.humidity,
+                        "wind_speed": record.wind_speed,
+                        "solar_radiation": record.solar_radiation,
+                    }
+                )
+                for record in recent_weather
+            ]
+            return builder.build_summary(
+                [observation for observation in observations if observation is not None],
+                lookback_days=resolved_days,
+                heat_day_threshold=resolved_heat_threshold,
+            )
+
+        weather_history_table = reflect_tables(self.db, "weather_history")["weather_history"]
+        date_column_name = "date" if "date" in weather_history_table.c else "weather_date"
+        date_column = getattr(weather_history_table.c, date_column_name)
+        normalized_field_id = self._normalize_identifier(weather_history_table.c.field_id, field_id)
+        latest_date = self.db.execute(
+            select(func.max(date_column)).where(weather_history_table.c.field_id == normalized_field_id)
+        ).scalar_one_or_none()
+        if latest_date is None:
             return None
 
-        avg_temp = round(sum(record.avg_temp for record in recent_weather) / len(recent_weather), 2)
-        total_rainfall = round(sum(record.rainfall_mm for record in recent_weather), 2)
-        frost_days = sum(1 for record in recent_weather if record.min_temp < 0)
-        heat_days = sum(1 for record in recent_weather if record.max_temp > heat_threshold_c)
-
-        return ClimateSummary(
-            avg_temp=avg_temp,
-            total_rainfall=total_rainfall,
-            frost_days=frost_days,
-            heat_days=heat_days,
+        start_date = self._window_start(latest_date, resolved_days)
+        rows = self.db.execute(
+            select(weather_history_table)
+            .where(weather_history_table.c.field_id == normalized_field_id)
+            .where(date_column >= start_date, date_column <= latest_date)
+            .order_by(date_column.desc())
+        ).mappings().all()
+        observations = [
+            builder.observation_from_mapping(row, date_column_name=date_column_name)
+            for row in rows
+        ]
+        return builder.build_summary(
+            [observation for observation in observations if observation is not None],
+            lookback_days=resolved_days,
+            heat_day_threshold=resolved_heat_threshold,
         )
 
     def _get_latest_weather_date(self, field_id: int) -> date | None:
@@ -143,6 +186,31 @@ class WeatherService:
         )
         return latest_record.date if latest_record is not None else None
 
+    def _supports_orm_weather_service(self) -> bool:
+        return table_has_columns(self.db, "weather_history", "date")
+
     @staticmethod
     def _window_start(latest_date: date, days: int) -> date:
         return latest_date - timedelta(days=days - 1)
+
+    @staticmethod
+    def _normalize_identifier(column, identifier: int | str | UUID) -> int | str | UUID:
+        if not isinstance(identifier, str):
+            return identifier
+
+        try:
+            python_type = column.type.python_type
+        except (AttributeError, NotImplementedError):
+            return identifier
+
+        if python_type is int:
+            try:
+                return int(identifier)
+            except ValueError:
+                return identifier
+        if python_type is UUID:
+            try:
+                return UUID(identifier)
+            except ValueError:
+                return identifier
+        return identifier

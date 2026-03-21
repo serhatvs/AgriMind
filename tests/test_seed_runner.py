@@ -70,6 +70,22 @@ def _build_live_like_schema(metadata: MetaData) -> None:
         Column("updated_at", DateTime, nullable=False),
     )
     Table(
+        "crop_economic_profiles",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("crop_name", Text, nullable=False),
+        Column("average_market_price_per_unit", Float, nullable=False),
+        Column("price_unit", Text, nullable=False),
+        Column("base_cost_per_hectare", Float, nullable=False),
+        Column("irrigation_cost_factor", Float, nullable=False),
+        Column("fertilizer_cost_factor", Float, nullable=False),
+        Column("labor_cost_factor", Float, nullable=False),
+        Column("risk_cost_factor", Float, nullable=False),
+        Column("region", Text),
+        Column("created_at", DateTime, nullable=False),
+        Column("updated_at", DateTime, nullable=False),
+    )
+    Table(
         "weather_history",
         metadata,
         Column("id", String, primary_key=True),
@@ -103,10 +119,12 @@ def test_run_seed_populates_expected_demo_counts():
         session.commit()
 
         assert summary.crops_created == 5
+        assert summary.economic_profiles_created == 5
         assert summary.fields_created == 10
         assert summary.soil_tests_created == 10
         assert summary.weather_rows_created == 280
         assert _count(session, "crop_profiles") == 5
+        assert _count(session, "crop_economic_profiles") == 5
         assert _count(session, "fields") == 10
         assert _count(session, "soil_tests") == 10
         assert _count(session, "weather_history") == 280
@@ -126,11 +144,14 @@ def test_run_seed_is_idempotent_for_seed_managed_rows():
         session.commit()
 
         assert first_summary.crops_created == 5
+        assert first_summary.economic_profiles_created == 5
         assert second_summary.crops_updated == 5
+        assert second_summary.economic_profiles_updated == 5
         assert second_summary.fields_updated == 10
         assert second_summary.soil_tests_updated == 10
         assert second_summary.weather_rows_updated == 280
         assert _count(session, "crop_profiles") == 5
+        assert _count(session, "crop_economic_profiles") == 5
         assert _count(session, "fields") == 10
         assert _count(session, "soil_tests") == 10
         assert _count(session, "weather_history") == 280

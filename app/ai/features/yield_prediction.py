@@ -71,6 +71,8 @@ def build_yield_prediction_input_from_summary(
                 nitrogen_ppm=summary.soil.nitrogen_ppm,
                 phosphorus_ppm=summary.soil.phosphorus_ppm,
                 potassium_ppm=summary.soil.potassium_ppm,
+                calcium_ppm=summary.soil.calcium_ppm,
+                magnesium_ppm=summary.soil.magnesium_ppm,
                 depth_cm=summary.soil.depth_cm,
                 water_holding_capacity=summary.soil.water_holding_capacity,
                 texture_class=summary.soil.texture_class,
@@ -83,8 +85,12 @@ def build_yield_prediction_input_from_summary(
         crop=YieldCropSummary(
             crop_id=summary.crop.crop_id,
             crop_name=summary.crop.crop_name,
+            ideal_ph_min=summary.crop.ideal_ph_min,
+            ideal_ph_max=summary.crop.ideal_ph_max,
             water_requirement_level=summary.crop.water_requirement_level or "",
             drainage_requirement=summary.crop.drainage_requirement or "",
+            frost_sensitivity=summary.crop.frost_sensitivity,
+            heat_sensitivity=summary.crop.heat_sensitivity,
             salinity_tolerance=summary.crop.salinity_tolerance,
             rooting_depth_cm=summary.crop.rooting_depth_cm,
             slope_tolerance=summary.crop.slope_tolerance,
@@ -98,9 +104,15 @@ def build_yield_prediction_input_from_summary(
         climate=(
             YieldClimateSummary(
                 avg_temp=summary.climate.avg_temp,
+                min_observed_temp=summary.climate.min_observed_temp,
+                max_observed_temp=summary.climate.max_observed_temp,
                 total_rainfall=summary.climate.total_rainfall,
                 frost_days=summary.climate.frost_days,
                 heat_days=summary.climate.heat_days,
+                avg_humidity=summary.climate.avg_humidity,
+                avg_wind_speed=summary.climate.avg_wind_speed,
+                avg_solar_radiation=summary.climate.avg_solar_radiation,
+                weather_record_count=summary.climate.weather_record_count,
             )
             if summary.climate is not None
             else None

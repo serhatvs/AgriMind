@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from app.models.crop_economic_profile import CropEconomicProfile
 from app.schemas.ai_metadata import AITraceMetadataRead
 from app.models.crop_price import CropPrice
 from app.models.crop_profile import CropProfile
@@ -57,11 +58,15 @@ def _build_crop() -> CropProfile:
 
 
 def _yield_prediction(field_id: int, crop_id: int, yield_per_hectare: float) -> YieldPredictionResult:
+    predicted_yield_min = max(0.0, yield_per_hectare - 1.0)
+    predicted_yield_max = yield_per_hectare + 1.0
     return YieldPredictionResult(
         field_id=field_id,
         crop_id=crop_id,
         predicted_yield_per_hectare=yield_per_hectare,
-        predicted_yield_range=YieldPredictionRange(min=max(0.0, yield_per_hectare - 1.0), max=yield_per_hectare + 1.0),
+        predicted_yield_min=predicted_yield_min,
+        predicted_yield_max=predicted_yield_max,
+        predicted_yield_range=YieldPredictionRange(min=predicted_yield_min, max=predicted_yield_max),
         confidence_score=0.82,
         model_version="yield-xgb-v1",
         training_source="test",
@@ -127,7 +132,8 @@ def test_economic_service_calculates_profit_and_reasons(db, tmp_path):
     assert assessment.estimated_revenue == 37800.0
     assert assessment.estimated_cost == 10700.0
     assert assessment.estimated_profit == 27100.0
-    assert "High profit due to high yield and low cost." in assessment.strengths
+    assert assessment.economic_score > 0
+    assert "This field is highly profitable due to strong yield and favorable market price." in assessment.strengths
 
 
 def test_economic_service_reports_irrigation_cost_pressure(db, tmp_path):
@@ -149,7 +155,7 @@ def test_economic_service_reports_irrigation_cost_pressure(db, tmp_path):
 
     assert assessment.estimated_profit is not None
     assert assessment.estimated_profit < 0
-    assert "Low profitability due to irrigation cost." in assessment.weaknesses
+    assert "High irrigation cost reduces overall profitability." in assessment.weaknesses
 
 
 def test_economic_service_handles_missing_crop_economics(db, tmp_path):
@@ -185,3 +191,45 @@ def test_economic_service_handles_missing_crop_economics(db, tmp_path):
 
     assert assessment.estimated_profit is None
     assert assessment.reasons == ["Economic data unavailable for this crop."]
+
+
+def test_economic_service_uses_crop_economic_profile_when_available(db, tmp_path):
+    field = _build_field(irrigation_available=True)
+    crop = _build_crop()
+    crop.crop_price = None
+    crop.input_cost = None
+    db.add_all(
+        [
+            field,
+            crop,
+            CropEconomicProfile(
+                crop_name="Corn",
+                average_market_price_per_unit=225.0,
+                price_unit="ton",
+                base_cost_per_hectare=340.0,
+                irrigation_cost_factor=0.16,
+                fertilizer_cost_factor=0.2,
+                labor_cost_factor=0.1,
+                risk_cost_factor=0.05,
+                region=None,
+            ),
+        ]
+    )
+    db.commit()
+
+    service = EconomicService(
+        db,
+        yield_prediction_service=YieldPredictionService(db, model_dir=tmp_path / "yield_model"),
+    )
+    assessment = service.calculate_profit(
+        field,
+        crop,
+        yield_prediction=_yield_prediction(field.id, crop.id, 8.4),
+    )
+
+    assert assessment.estimated_revenue == 37800.0
+    assert assessment.estimated_cost is not None
+    assert assessment.estimated_profit is not None
+    assert assessment.economic_score > 0
+    assert assessment.cost_breakdown is not None
+    assert assessment.cost_breakdown.base_cost > 0

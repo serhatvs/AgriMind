@@ -68,13 +68,22 @@ def test_settings_accept_stub_provider_ids():
     assert config.AI_EXTRACTION_PROVIDER == "stub"
 
 
+def test_settings_accept_deterministic_yield_provider():
+    config = Settings(
+        _env_file=None,
+        YIELD_PROVIDER="deterministic",
+    )
+
+    assert config.AI_YIELD_PROVIDER == "deterministic"
+
+
 @pytest.mark.parametrize(
     ("setting_name", "setting_value", "expected_message"),
     [
         (
             "YIELD_PROVIDER",
             "rule_based",
-            "YIELD_PROVIDER='rule_based' is not supported. Allowed values: stub, ml, xgboost",
+            "YIELD_PROVIDER='rule_based' is not supported. Allowed values: deterministic, stub, ml, xgboost",
         ),
         (
             "EXPLANATION_PROVIDER",
@@ -102,6 +111,25 @@ def test_faostat_defaults_are_present():
     assert "Production_Crops_Livestock" in config.FAOSTAT_BULK_DOWNLOAD_URL
     assert config.FAOSTAT_DEFAULT_LOOKBACK_YEARS == 1
     assert config.FAOSTAT_BATCH_SIZE == 500
+
+
+def test_climate_ranking_defaults_are_present():
+    config = Settings(_env_file=None)
+
+    assert config.CLIMATE_LOOKBACK_DAYS == 30
+    assert config.HEAT_DAY_THRESHOLD == 35.0
+    assert config.AGRONOMIC_SCORE_WEIGHT == 0.65
+    assert config.CLIMATE_SCORE_WEIGHT == 0.35
+
+
+def test_yield_training_defaults_are_present():
+    config = Settings(_env_file=None)
+
+    assert config.YIELD_MODEL_PATH.endswith("yield_model.json")
+    assert config.YIELD_MODEL_VERSION == "yield-xgb-v1"
+    assert config.YIELD_TRAINING_SAMPLE_COUNT == 600
+    assert config.YIELD_TRAINING_RANDOM_SEED == 20260321
+    assert config.YIELD_MIN_REAL_TRAINING_SAMPLES == 25
 
 
 def test_ingestion_source_filters_support_allow_and_deny_lists():
@@ -135,6 +163,11 @@ def test_ingestion_source_filters_support_allow_and_deny_lists():
             "yaml",
             "INGESTION_LOG_FORMAT must be either 'json' or 'text'",
         ),
+        ("CLIMATE_LOOKBACK_DAYS", 0, "CLIMATE_LOOKBACK_DAYS must be greater than 0"),
+        ("HEAT_DAY_THRESHOLD", 8, "HEAT_DAY_THRESHOLD must be between 10 and 70"),
+        ("YIELD_MODEL_VERSION", "   ", "YIELD_MODEL_VERSION must not be blank"),
+        ("YIELD_TRAINING_SAMPLE_COUNT", 0, "YIELD_TRAINING_SAMPLE_COUNT must be greater than 0"),
+        ("YIELD_MIN_REAL_TRAINING_SAMPLES", 0, "YIELD_MIN_REAL_TRAINING_SAMPLES must be greater than 0"),
     ],
 )
 def test_invalid_faostat_settings_fail_clearly(setting_name, setting_value, expected_message):
@@ -151,4 +184,16 @@ def test_overlapping_ingestion_source_filters_fail_clearly():
             _env_file=None,
             INGESTION_ENABLED_SOURCES="NASA POWER Daily",
             INGESTION_DISABLED_SOURCES="nasa power daily",
+        )
+
+
+def test_ranking_weights_must_sum_to_more_than_zero():
+    with pytest.raises(
+        ValidationError,
+        match="CLIMATE_SCORE_WEIGHT and AGRONOMIC_SCORE_WEIGHT must sum to more than 0",
+    ):
+        Settings(
+            _env_file=None,
+            CLIMATE_SCORE_WEIGHT=0.0,
+            AGRONOMIC_SCORE_WEIGHT=0.0,
         )

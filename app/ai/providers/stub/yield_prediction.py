@@ -32,19 +32,21 @@ class DeterministicYieldPredictor(YieldPredictor):
         margin = self._estimate_margin(confidence)
         return YieldPredictionOutput(
             predicted_yield=predicted_yield,
-            yield_range_min=round_stable(clamp(predicted_yield - margin, 0.0, predicted_yield)),
-            yield_range_max=round_stable(predicted_yield + margin),
+            predicted_yield_min=round_stable(clamp(predicted_yield - margin, 0.0, predicted_yield)),
+            predicted_yield_max=round_stable(predicted_yield + margin),
             metadata=AITraceMetadata(
-                provider_name="deterministic_stub_provider",
+                provider_name="deterministic_yield_prediction",
                 provider_version="v1",
                 generated_at=datetime.now(timezone.utc),
                 confidence=confidence,
                 debug_info={
-                    "stub": True,
+                    "fallback": True,
                     "has_soil": request.soil is not None,
                     "has_climate": request.climate is not None,
+                    "field_irrigated": request.field.irrigation_available,
                 },
             ),
+            training_source="deterministic_heuristics",
         )
 
     def train_model(
@@ -58,7 +60,7 @@ class DeterministicYieldPredictor(YieldPredictor):
         """Return deterministic metadata for legacy training calls against the stub."""
 
         return {
-            "provider_name": "deterministic_stub_provider",
+            "provider_name": "deterministic_yield_prediction",
             "provider_version": "v1",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "sample_count": sample_count,
@@ -68,7 +70,7 @@ class DeterministicYieldPredictor(YieldPredictor):
         }
 
     def _estimate_yield(self, request: YieldPredictionInput) -> float:
-        score = 6.4
+        score = 6.1
         field = request.field
         crop = request.crop
         soil = request.soil
@@ -94,9 +96,9 @@ class DeterministicYieldPredictor(YieldPredictor):
             score -= 0.2
 
         if soil is not None:
-            score += 0.2
+            score += 0.22
             if soil.ph is not None:
-                if 6.0 <= soil.ph <= 7.0:
+                if crop.ideal_ph_min is not None and crop.ideal_ph_max is not None and crop.ideal_ph_min <= soil.ph <= crop.ideal_ph_max:
                     score += 0.15
                 elif 5.5 <= soil.ph <= 7.5:
                     score += 0.05
@@ -105,24 +107,38 @@ class DeterministicYieldPredictor(YieldPredictor):
 
             if soil.organic_matter_percent is not None and soil.organic_matter_percent >= 3.0:
                 score += 0.1
+            if soil.nitrogen_ppm is not None and soil.nitrogen_ppm >= 40:
+                score += 0.12
+            if soil.phosphorus_ppm is not None and soil.phosphorus_ppm >= 25:
+                score += 0.07
+            if soil.potassium_ppm is not None and soil.potassium_ppm >= 180:
+                score += 0.07
+            if soil.ec is not None and soil.ec > 3.0:
+                score -= 0.18
 
         if climate is not None:
-            score += 0.2
+            score += 0.22
+            climate_signal = 0.0
             if (
                 crop.optimal_temp_min_c is not None
                 and crop.optimal_temp_max_c is not None
                 and climate.avg_temp is not None
             ):
                 if crop.optimal_temp_min_c <= climate.avg_temp <= crop.optimal_temp_max_c:
-                    score += 0.15
+                    climate_signal += 0.16
                 else:
-                    score -= 0.1
+                    climate_signal -= 0.12
 
             if crop.rainfall_requirement_mm is not None and climate.total_rainfall is not None:
                 if climate.total_rainfall >= crop.rainfall_requirement_mm * 0.75:
-                    score += 0.1
+                    climate_signal += 0.1
                 else:
-                    score -= 0.1
+                    climate_signal -= 0.14
+            if climate.frost_days is not None and crop.frost_tolerance_days is not None:
+                climate_signal += 0.05 if climate.frost_days <= crop.frost_tolerance_days else -0.1
+            if climate.heat_days is not None and crop.heat_tolerance_days is not None:
+                climate_signal += 0.05 if climate.heat_days <= crop.heat_tolerance_days else -0.1
+            score += climate_signal
 
         return round_stable(clamp(score, 4.8, 9.3))
 

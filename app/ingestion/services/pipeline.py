@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable, Sequence
+import logging
 from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.ingestion.clients.base import IngestionClient
 from app.ingestion.services.repository import IngestionRepository
 from app.ingestion.transformers.base import PayloadTransformer
@@ -24,6 +26,9 @@ from app.ingestion.validators.base import RecordValidator, validate_records
 from app.models.enums import IngestionRunStatus, IngestionRunType
 from app.models.ingestion import DataSource, IngestionRun
 from app.services.errors import ServiceValidationError
+
+
+logger = logging.getLogger(__name__)
 
 
 class NormalizedRecordWriter(Protocol):
@@ -75,10 +80,25 @@ class IngestionPipelineService:
         if not data_source.is_active:
             raise ServiceValidationError(f"Data source '{data_source.source_name}' is inactive")
 
+        stale_runs = self.repository.mark_stale_running_runs(
+            data_source_id=data_source.id,
+            stale_run_minutes=settings.INGESTION_STALE_RUN_MINUTES,
+        )
+        if stale_runs:
+            logger.warning(
+                "Marked %s stale ingestion run(s) before starting '%s'",
+                len(stale_runs),
+                data_source.source_name,
+            )
+
+        initial_metadata = {
+            **dict(metadata_json or {}),
+            "stale_runs_marked_before_start": len(stale_runs),
+        }
         ingestion_run = self.repository.create_ingestion_run(
             data_source,
             run_type=run_type,
-            metadata_json=metadata_json,
+            metadata_json=initial_metadata,
         )
 
         records_fetched = 0
@@ -87,6 +107,8 @@ class IngestionPipelineService:
         validation_issues: list[ValidationIssue] = []
         validated_record_count = 0
         validation_skipped_records: list[SkippedRecord] = []
+        finalized_run: IngestionRun | None = None
+        terminal_exception: Exception | None = None
 
         try:
             payloads = list(self.client.fetch(data_source, run_type=run_type))
@@ -152,7 +174,7 @@ class IngestionPipelineService:
                 else IngestionRunStatus.SUCCEEDED
             )
             run_metadata = self._build_run_metadata(
-                initial_metadata=metadata_json,
+                initial_metadata=initial_metadata,
                 validation_issues=validation_issues,
                 validated_records=validated_record_count,
                 skipped_records=tuple(validation_skipped_records) + persist_result.skipped_records,
@@ -167,23 +189,46 @@ class IngestionPipelineService:
                 metadata_json=run_metadata,
             )
         except Exception as exc:
+            terminal_exception = exc
             run_metadata = self._build_run_metadata(
-                initial_metadata=metadata_json,
+                initial_metadata=initial_metadata,
                 validation_issues=validation_issues,
                 validated_records=validated_record_count,
                 skipped_records=tuple(validation_skipped_records),
                 writer_metadata=None,
             )
-            finalized_run = self.repository.finalize_ingestion_run(
-                ingestion_run,
-                status=IngestionRunStatus.FAILED,
-                records_fetched=records_fetched,
-                records_inserted=records_inserted,
-                records_skipped=records_skipped,
-                metadata_json=run_metadata,
-                error_message=str(exc),
-            )
             raise
+        finally:
+            if finalized_run is None:
+                run_metadata = self._build_run_metadata(
+                    initial_metadata=initial_metadata,
+                    validation_issues=validation_issues,
+                    validated_records=validated_record_count,
+                    skipped_records=tuple(validation_skipped_records),
+                    writer_metadata=None,
+                )
+                failure_message = (
+                    str(terminal_exception)
+                    if terminal_exception is not None
+                    else "Ingestion run exited without a terminal status."
+                )
+                try:
+                    finalized_run = self.repository.finalize_ingestion_run(
+                        ingestion_run,
+                        status=IngestionRunStatus.FAILED,
+                        records_fetched=records_fetched,
+                        records_inserted=records_inserted,
+                        records_skipped=records_skipped,
+                        metadata_json=run_metadata,
+                        error_message=failure_message,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to finalize ingestion run '%s' for source '%s'",
+                        ingestion_run.id,
+                        data_source.source_name,
+                    )
+                    raise
 
         return IngestionExecutionResult(
             ingestion_run_id=finalized_run.id,

@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     AI_ASSISTANT_PROVIDER: str = "openai"
     AI_EXTRACTION_PROVIDER: str = "rule_based"
     YIELD_MODEL_DIR: str = "artifacts/yield_model"
+    YIELD_MODEL_PATH: str = "artifacts/yield_model/yield_model.json"
+    YIELD_MODEL_VERSION: str = "yield-xgb-v1"
+    YIELD_TRAINING_SAMPLE_COUNT: int = 600
+    YIELD_TRAINING_RANDOM_SEED: int = 20260321
+    YIELD_MIN_REAL_TRAINING_SAMPLES: int = 25
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4.1-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
@@ -51,6 +56,13 @@ class Settings(BaseSettings):
     NASA_POWER_DEFAULT_LOOKBACK_DAYS: int = 30
     NASA_POWER_MAX_WINDOW_SHIFTS: int = 18
     NASA_POWER_TIME_STANDARD: str = "UTC"
+    CLIMATE_LOOKBACK_DAYS: int = 30
+    HEAT_DAY_THRESHOLD: float = 35.0
+    CLIMATE_SCORE_WEIGHT: float = 0.35
+    AGRONOMIC_SCORE_WEIGHT: float = 0.65
+    ECONOMIC_SCORE_WEIGHT: float = 0.3
+    DEFAULT_CROP_PRICE_SOURCE: str = "static"
+    ENABLE_ECONOMIC_SCORING: bool = True
     FAOSTAT_SOURCE_NAME: str = "FAOSTAT Crops and Livestock"
     FAOSTAT_API_BASE_URL: str = "https://faostatservices.fao.org/api/v1/en/data/QCL"
     FAOSTAT_API_TOKEN: str | None = None
@@ -67,13 +79,15 @@ class Settings(BaseSettings):
     INGESTION_ENABLED_SOURCES: str = ""
     INGESTION_DISABLED_SOURCES: str = ""
     INGESTION_AUTO_CREATE_TABLES: bool = True
+    INGESTION_STALE_RUN_MINUTES: int = 60
 
     _PROVIDER_SETTING_SPECS: ClassVar[dict[str, ProviderSettingSpec]] = {
         "yield": ProviderSettingSpec(
             short_field="YIELD_PROVIDER",
             canonical_field="AI_YIELD_PROVIDER",
-            allowed_values=("stub", "ml", "xgboost"),
+            allowed_values=("deterministic", "stub", "ml", "xgboost"),
             aliases={
+                "deterministic": "deterministic",
                 "stub": "stub",
                 "ml": "xgboost",
                 "xgboost": "xgboost",
@@ -158,6 +172,62 @@ class Settings(BaseSettings):
             raise ValueError("NASA_POWER_MAX_WINDOW_SHIFTS must be greater than or equal to 0")
         return value
 
+    @field_validator("CLIMATE_LOOKBACK_DAYS")
+    @classmethod
+    def validate_climate_lookback_days(cls, value: int) -> int:
+        """Ensure the climate lookback window is positive."""
+
+        if value <= 0:
+            raise ValueError("CLIMATE_LOOKBACK_DAYS must be greater than 0")
+        return value
+
+    @field_validator("HEAT_DAY_THRESHOLD")
+    @classmethod
+    def validate_heat_day_threshold(cls, value: float) -> float:
+        """Ensure the heat-day threshold is within a sane agronomic range."""
+
+        if value < 10 or value > 70:
+            raise ValueError("HEAT_DAY_THRESHOLD must be between 10 and 70")
+        return value
+
+    @field_validator("CLIMATE_SCORE_WEIGHT", "AGRONOMIC_SCORE_WEIGHT", "ECONOMIC_SCORE_WEIGHT")
+    @classmethod
+    def validate_ranking_score_weights(cls, value: float, info) -> float:
+        """Ensure climate and agronomic score weights are non-negative."""
+
+        if value < 0:
+            raise ValueError(f"{info.field_name} must be greater than or equal to 0")
+        return value
+
+    @field_validator("DEFAULT_CROP_PRICE_SOURCE")
+    @classmethod
+    def validate_default_crop_price_source(cls, value: str) -> str:
+        """Normalize the configured crop price source identifier."""
+
+        normalized = value.strip().lower()
+        if normalized not in {"static", "manual"}:
+            raise ValueError("DEFAULT_CROP_PRICE_SOURCE must be either 'static' or 'manual'")
+        return normalized
+
+    @field_validator("YIELD_MODEL_VERSION")
+    @classmethod
+    def validate_yield_model_version(cls, value: str) -> str:
+        """Ensure the configured yield model version is not blank."""
+
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("YIELD_MODEL_VERSION must not be blank")
+        return normalized
+
+    @field_validator("YIELD_TRAINING_SAMPLE_COUNT", "YIELD_MIN_REAL_TRAINING_SAMPLES")
+    @classmethod
+    def validate_yield_training_counts(cls, value: int, info) -> int:
+        """Ensure configured yield training sample counts are positive."""
+
+        if value <= 0:
+            raise ValueError(f"{info.field_name} must be greater than 0")
+        return value
+
     @field_validator("FAOSTAT_DEFAULT_LOOKBACK_YEARS")
     @classmethod
     def validate_faostat_lookback_years(cls, value: int) -> int:
@@ -174,6 +244,15 @@ class Settings(BaseSettings):
 
         if value <= 0:
             raise ValueError("FAOSTAT_BATCH_SIZE must be greater than 0")
+        return value
+
+    @field_validator("INGESTION_STALE_RUN_MINUTES")
+    @classmethod
+    def validate_ingestion_stale_run_minutes(cls, value: int) -> int:
+        """Ensure the stale-run timeout is positive."""
+
+        if value <= 0:
+            raise ValueError("INGESTION_STALE_RUN_MINUTES must be greater than 0")
         return value
 
     @field_validator("INGESTION_LOG_FORMAT")
@@ -207,6 +286,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 "INGESTION_ENABLED_SOURCES and INGESTION_DISABLED_SOURCES "
                 f"cannot overlap: {duplicates}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_ranking_weight_sum(self) -> Self:
+        """Ensure climate and agronomic weights produce a usable composite score."""
+
+        total_weight = self.CLIMATE_SCORE_WEIGHT + self.AGRONOMIC_SCORE_WEIGHT
+        if total_weight <= 0:
+            raise ValueError(
+                "CLIMATE_SCORE_WEIGHT and AGRONOMIC_SCORE_WEIGHT must sum to more than 0"
             )
         return self
 

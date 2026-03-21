@@ -194,9 +194,37 @@ def _build_mock_feature_bundle(crop: CropProfile, rng: random.Random) -> YieldFe
     ph = _sample_ph(crop, rng)
     ec = _sample_ec(crop_name, rng)
     nitrogen_ppm, phosphorus_ppm, potassium_ppm = _sample_nutrients(crop_name, rng)
+    calcium_ppm = round(rng.uniform(1200.0, 2400.0), 2)
+    magnesium_ppm = round(rng.uniform(120.0, 320.0), 2)
 
     climate_summary_available = rng.random() > 0.05
     soil_test_available = rng.random() > 0.04
+    climate_avg_temp = (temp_mid + rng.uniform(-5.5, 5.5)) if climate_summary_available else None
+    climate_min_observed_temp = (
+        climate_avg_temp - rng.uniform(5.0, 12.0)
+        if climate_avg_temp is not None
+        else None
+    )
+    climate_max_observed_temp = (
+        climate_avg_temp + rng.uniform(5.0, 12.0)
+        if climate_avg_temp is not None
+        else None
+    )
+    climate_total_rainfall = (rainfall_target * rng.uniform(0.45, 1.45)) if climate_summary_available else None
+    climate_frost_days = (
+        int(max(0, rng.gauss((crop.frost_tolerance_days or 8) * 0.9, 4)))
+        if climate_summary_available
+        else None
+    )
+    climate_heat_days = (
+        int(max(0, rng.gauss((crop.heat_tolerance_days or 10) * 0.9, 4)))
+        if climate_summary_available
+        else None
+    )
+    climate_avg_humidity = round(rng.uniform(38.0, 78.0), 2) if climate_summary_available else None
+    climate_avg_wind_speed = round(rng.uniform(1.5, 7.5), 2) if climate_summary_available else None
+    climate_avg_solar_radiation = round(rng.uniform(10.0, 24.0), 2) if climate_summary_available else None
+    climate_weather_record_count = int(rng.uniform(18, 30)) if climate_summary_available else None
 
     return YieldFeatureBundle(
         crop_name=crop.crop_name,
@@ -206,6 +234,8 @@ def _build_mock_feature_bundle(crop: CropProfile, rng: random.Random) -> YieldFe
         nitrogen_ppm=nitrogen_ppm if soil_test_available else None,
         phosphorus_ppm=phosphorus_ppm if soil_test_available else None,
         potassium_ppm=potassium_ppm if soil_test_available else None,
+        calcium_ppm=calcium_ppm if soil_test_available else None,
+        magnesium_ppm=magnesium_ppm if soil_test_available else None,
         soil_depth_cm=(crop.rooting_depth_cm or 120.0) * rng.uniform(0.75, 1.25) if soil_test_available else None,
         water_holding_capacity=rng.uniform(14.0, 28.0) if soil_test_available else None,
         texture_class=texture_class if soil_test_available else None,
@@ -218,8 +248,12 @@ def _build_mock_feature_bundle(crop: CropProfile, rng: random.Random) -> YieldFe
         infrastructure_score=int(rng.uniform(45.0, 95.0 if irrigated else 82.0)),
         water_source_type=_sample_water_source(irrigated, rng),
         aspect=rng.choice(["flat", "north", "south", "east", "west", "southeast", "southwest"]),
+        crop_ideal_ph_min=crop.ideal_ph_min,
+        crop_ideal_ph_max=crop.ideal_ph_max,
         crop_water_requirement=crop.water_requirement_level.value,
         crop_drainage_requirement=crop.drainage_requirement.value,
+        crop_frost_sensitivity=crop.frost_sensitivity.value,
+        crop_heat_sensitivity=crop.heat_sensitivity.value,
         crop_salinity_tolerance=crop.salinity_tolerance.value if crop.salinity_tolerance is not None else None,
         crop_rooting_depth_cm=crop.rooting_depth_cm,
         crop_slope_tolerance=crop.slope_tolerance,
@@ -229,10 +263,16 @@ def _build_mock_feature_bundle(crop: CropProfile, rng: random.Random) -> YieldFe
         crop_frost_tolerance_days=crop.frost_tolerance_days,
         crop_heat_tolerance_days=crop.heat_tolerance_days,
         crop_organic_matter_preference=organic_pref,
-        climate_avg_temp=(temp_mid + rng.uniform(-5.5, 5.5)) if climate_summary_available else None,
-        climate_total_rainfall=(rainfall_target * rng.uniform(0.45, 1.45)) if climate_summary_available else None,
-        climate_frost_days=int(max(0, rng.gauss((crop.frost_tolerance_days or 8) * 0.9, 4))) if climate_summary_available else None,
-        climate_heat_days=int(max(0, rng.gauss((crop.heat_tolerance_days or 10) * 0.9, 4))) if climate_summary_available else None,
+        climate_avg_temp=climate_avg_temp,
+        climate_min_observed_temp=climate_min_observed_temp,
+        climate_max_observed_temp=climate_max_observed_temp,
+        climate_total_rainfall=climate_total_rainfall,
+        climate_frost_days=climate_frost_days,
+        climate_heat_days=climate_heat_days,
+        climate_avg_humidity=climate_avg_humidity,
+        climate_avg_wind_speed=climate_avg_wind_speed,
+        climate_avg_solar_radiation=climate_avg_solar_radiation,
+        climate_weather_record_count=climate_weather_record_count,
         has_soil_test=soil_test_available,
         has_climate_summary=climate_summary_available,
     )

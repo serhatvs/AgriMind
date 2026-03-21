@@ -3,26 +3,16 @@
 from __future__ import annotations
 
 from app.ai.contracts.ranking import RankingAugmentationCandidate, RankingAugmentationProvider
+from app.config import settings
+from app.engines.economic_scoring import score_profitability
 
 
-def _economic_score_for_profit(
-    estimated_profit: float | None,
-    *,
-    max_positive_profit: float,
-    max_loss_magnitude: float,
-) -> float:
-    if estimated_profit is None:
+def _weighted_average(values: list[tuple[float, float]]) -> float:
+    total_weight = sum(weight for _, weight in values if weight > 0)
+    if total_weight <= 0:
         return 0.0
-    if estimated_profit == 0:
-        return 50.0
-    if estimated_profit > 0:
-        if max_positive_profit <= 0:
-            return 100.0
-        return round(min(100.0, 50.0 + ((estimated_profit / max_positive_profit) * 50.0)), 2)
-
-    if max_loss_magnitude <= 0:
-        return 0.0
-    return round(max(0.0, 50.0 - ((abs(estimated_profit) / max_loss_magnitude) * 50.0)), 2)
+    weighted_total = sum(value * weight for value, weight in values if weight > 0)
+    return round(weighted_total / total_weight, 2)
 
 
 class RuleBasedRankingAugmentationProvider(RankingAugmentationProvider):
@@ -34,42 +24,52 @@ class RuleBasedRankingAugmentationProvider(RankingAugmentationProvider):
         *,
         economics_enabled: bool,
     ) -> None:
-        positive_profits = [
-            candidate.economic_assessment.estimated_profit
-            for candidate in candidates
-            if candidate.economic_assessment is not None
-            and candidate.economic_assessment.estimated_profit is not None
-            and candidate.economic_assessment.estimated_profit > 0
-        ]
-        loss_magnitudes = [
-            abs(candidate.economic_assessment.estimated_profit)
-            for candidate in candidates
-            if candidate.economic_assessment is not None
-            and candidate.economic_assessment.estimated_profit is not None
-            and candidate.economic_assessment.estimated_profit < 0
-        ]
-        max_positive_profit = max(positive_profits, default=0.0)
-        max_loss_magnitude = max(loss_magnitudes, default=0.0)
+        economic_scoring_enabled = economics_enabled and settings.ENABLE_ECONOMIC_SCORING
 
         for candidate in candidates:
-            if economics_enabled:
-                estimated_profit = (
-                    candidate.economic_assessment.estimated_profit
-                    if candidate.economic_assessment is not None
-                    else None
-                )
-                candidate.economic_score = _economic_score_for_profit(
-                    estimated_profit,
-                    max_positive_profit=max_positive_profit,
-                    max_loss_magnitude=max_loss_magnitude,
-                )
-                if candidate.scoring_result.total_score == 0.0:
-                    candidate.ranking_score = 0.0
-                else:
-                    candidate.ranking_score = round(
-                        (candidate.scoring_result.total_score * 0.7) + (candidate.economic_score * 0.3),
-                        2,
+            agronomic_score = candidate.scoring_result.agronomic_score
+            climate_score = candidate.scoring_result.climate_score
+
+            if economic_scoring_enabled:
+                assessment = candidate.economic_assessment
+                if assessment is None:
+                    candidate.economic_score = 0.0
+                elif assessment.economic_score > 0:
+                    candidate.economic_score = round(assessment.economic_score, 2)
+                elif (
+                    assessment.estimated_revenue is not None
+                    and assessment.estimated_cost is not None
+                    and assessment.estimated_profit is not None
+                ):
+                    candidate.economic_score = score_profitability(
+                        estimated_revenue=assessment.estimated_revenue,
+                        estimated_cost=assessment.estimated_cost,
+                        estimated_profit=assessment.estimated_profit,
+                        area_hectares=getattr(candidate.field_obj, "area_hectares", 1.0) or 1.0,
+                        confidence=(
+                            candidate.yield_prediction.confidence_score
+                            if getattr(candidate, "yield_prediction", None) is not None
+                            else candidate.scoring_result.confidence_score
+                        ),
                     )
+                else:
+                    candidate.economic_score = 0.0
             else:
                 candidate.economic_score = 0.0
-                candidate.ranking_score = candidate.scoring_result.total_score
+
+            if candidate.scoring_result.total_score == 0.0:
+                candidate.total_score = 0.0
+                candidate.ranking_score = 0.0
+                continue
+
+            weighted_components: list[tuple[float, float]] = [
+                (agronomic_score, settings.AGRONOMIC_SCORE_WEIGHT),
+            ]
+            if climate_score is not None:
+                weighted_components.append((climate_score, settings.CLIMATE_SCORE_WEIGHT))
+            if economic_scoring_enabled and candidate.economic_assessment is not None:
+                weighted_components.append((candidate.economic_score, settings.ECONOMIC_SCORE_WEIGHT))
+
+            composite_score = _weighted_average(weighted_components)
+            candidate.total_score = composite_score
+            candidate.ranking_score = composite_score

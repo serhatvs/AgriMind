@@ -1,4 +1,11 @@
-from seed import SEED_TAG, build_crop_specs, build_field_specs, build_seed_dataset, build_soil_specs
+from seed import (
+    SEED_TAG,
+    build_crop_economic_profile_specs,
+    build_crop_specs,
+    build_field_specs,
+    build_seed_dataset,
+    build_soil_specs,
+)
 
 
 def test_seed_dataset_matches_demo_requirements():
@@ -7,6 +14,7 @@ def test_seed_dataset_matches_demo_requirements():
     assert len(dataset.fields) == 10
     assert len(dataset.soils) == 10
     assert len(dataset.crops) == 5
+    assert len(dataset.economic_profiles) == 5
     assert len(dataset.weather) == 280
 
 
@@ -41,3 +49,9 @@ def test_seeded_soils_cover_multiple_agronomic_bands():
 
 def test_seed_tag_is_stable_for_idempotent_seed_management():
     assert SEED_TAG == "[agrimind-demo-seed:v1]"
+
+
+def test_seed_includes_required_crop_economic_profiles():
+    economic_profile_names = {profile.crop_name.lower() for profile in build_crop_economic_profile_specs()}
+
+    assert economic_profile_names == {"blackberry", "corn", "wheat", "sunflower", "chickpea"}

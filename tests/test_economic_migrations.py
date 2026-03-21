@@ -73,12 +73,27 @@ def test_crop_economics_migration_upgrade_and_downgrade(tmp_path):
     inspector = inspect(engine)
     assert "crop_prices" in inspector.get_table_names()
     assert "input_costs" in inspector.get_table_names()
+    assert "crop_economic_profiles" in inspector.get_table_names()
 
     crop_price_columns = {column["name"] for column in inspector.get_columns("crop_prices")}
     assert {"id", "crop_id", "price_per_ton"}.issubset(crop_price_columns)
 
     input_cost_columns = {column["name"] for column in inspector.get_columns("input_costs")}
     assert {"id", "crop_id", "fertilizer_cost", "water_cost", "labor_cost"}.issubset(input_cost_columns)
+
+    economic_profile_columns = {column["name"] for column in inspector.get_columns("crop_economic_profiles")}
+    assert {
+        "id",
+        "crop_name",
+        "average_market_price_per_unit",
+        "price_unit",
+        "base_cost_per_hectare",
+        "irrigation_cost_factor",
+        "fertilizer_cost_factor",
+        "labor_cost_factor",
+        "risk_cost_factor",
+        "region",
+    }.issubset(economic_profile_columns)
 
     crop_price_uniques = {constraint["name"] for constraint in inspector.get_unique_constraints("crop_prices")}
     input_cost_uniques = {constraint["name"] for constraint in inspector.get_unique_constraints("input_costs")}
@@ -87,8 +102,12 @@ def test_crop_economics_migration_upgrade_and_downgrade(tmp_path):
 
     crop_price_checks = {constraint["name"] for constraint in inspector.get_check_constraints("crop_prices")}
     input_cost_checks = {constraint["name"] for constraint in inspector.get_check_constraints("input_costs")}
+    economic_profile_checks = {
+        constraint["name"] for constraint in inspector.get_check_constraints("crop_economic_profiles")
+    }
     assert "ck_crop_prices_price_per_ton_positive" in crop_price_checks
     assert "ck_input_costs_fertilizer_cost_non_negative" in input_cost_checks
+    assert "ck_crop_economic_profiles_average_market_price_positive" in economic_profile_checks
 
     with engine.begin() as connection:
         connection.execute(
@@ -107,14 +126,48 @@ def test_crop_economics_migration_upgrade_and_downgrade(tmp_path):
                 """
             )
         )
+        connection.execute(
+            text(
+                """
+                INSERT INTO crop_economic_profiles (
+                    id,
+                    crop_name,
+                    average_market_price_per_unit,
+                    price_unit,
+                    base_cost_per_hectare,
+                    irrigation_cost_factor,
+                    fertilizer_cost_factor,
+                    labor_cost_factor,
+                    risk_cost_factor,
+                    region,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    1,
+                    'Corn',
+                    210.0,
+                    'ton',
+                    360.0,
+                    0.18,
+                    0.22,
+                    0.11,
+                    0.06,
+                    NULL,
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
 
     with engine.connect() as connection:
         row = connection.execute(
             text(
                 """
-                SELECT cp.price_per_ton, ic.water_cost
+                SELECT cp.price_per_ton, ic.water_cost, cep.average_market_price_per_unit
                 FROM crop_prices cp
                 JOIN input_costs ic ON ic.crop_id = cp.crop_id
+                JOIN crop_economic_profiles cep ON LOWER(cep.crop_name) = 'corn'
                 WHERE cp.crop_id = 1
                 """
             )
@@ -122,9 +175,11 @@ def test_crop_economics_migration_upgrade_and_downgrade(tmp_path):
 
     assert row["price_per_ton"] == 210.0
     assert row["water_cost"] == 165.0
+    assert row["average_market_price_per_unit"] == 210.0
 
     command.downgrade(config, "006")
 
     downgraded_tables = inspect(engine).get_table_names()
     assert "crop_prices" not in downgraded_tables
     assert "input_costs" not in downgraded_tables
+    assert "crop_economic_profiles" not in downgraded_tables

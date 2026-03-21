@@ -336,13 +336,21 @@ def test_rank_fields_api_returns_wrapped_ranking_response(client, db):
         "economic_score",
         "risk_score",
         "confidence_score",
+        "estimated_revenue",
+        "estimated_cost",
         "estimated_profit",
         "predicted_yield",
+        "predicted_yield_min",
+        "predicted_yield_max",
         "predicted_yield_range",
         "ranking_score",
         "strengths",
         "weaknesses",
         "risks",
+        "climate_reasons",
+        "climate_strengths",
+        "climate_weaknesses",
+        "climate_risks",
         "breakdown",
         "blockers",
         "reasons",
@@ -367,8 +375,11 @@ def test_rank_fields_api_returns_wrapped_ranking_response(client, db):
     }
     assert "No irrigation available for a high water-demand crop." in payload["ranked_results"][1]["explanation"]["risks"]
     assert payload["ranked_results"][0]["estimated_profit"] is not None
+    assert payload["ranked_results"][0]["estimated_revenue"] is not None
+    assert payload["ranked_results"][0]["estimated_cost"] is not None
     assert isinstance(payload["ranked_results"][0]["economic_score"], float)
-    assert payload["ranked_results"][0]["agronomic_score"] == payload["ranked_results"][0]["total_score"]
+    assert payload["ranked_results"][0]["ranking_score"] == payload["ranked_results"][0]["total_score"]
+    assert isinstance(payload["ranked_results"][0]["climate_reasons"], list)
     assert isinstance(payload["ranked_results"][0]["strengths"], list)
     assert isinstance(payload["ranked_results"][0]["metadata"]["provider_name"], str)
     assert isinstance(payload["ranked_results"][0]["provider_metadata"]["explanation_provider"]["provider_name"], str)

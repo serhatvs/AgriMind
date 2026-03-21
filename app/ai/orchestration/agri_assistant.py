@@ -76,12 +76,15 @@ def _select_ranked_result(
 
 def _build_why_this_field(result: RankedFieldRecommendation) -> list[str]:
     highlights = _dedupe_messages(result.explanation.strengths + _positive_reasons(result))
-    why_this_field = [
-        (
-            f"Rank #{result.rank} with ranking score {result.ranking_score:.1f}/100 "
-            f"and agronomic score {result.total_score:.1f}/100."
-        )
-    ]
+    score_summary = (
+        f"Rank #{result.rank} with ranking score {result.ranking_score:.1f}/100 "
+        f"and agronomic score {result.agronomic_score:.1f}/100"
+    )
+    if result.climate_score is not None:
+        score_summary += f" with climate score {result.climate_score:.1f}/100."
+    else:
+        score_summary += "."
+    why_this_field = [score_summary]
     why_this_field.extend(highlights[:3])
     return why_this_field
 

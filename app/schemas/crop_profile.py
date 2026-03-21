@@ -92,10 +92,28 @@ class CropProfileBase(BaseModel):
     )
     optimal_temp_min_c: float | None = None
     optimal_temp_max_c: float | None = None
+    tolerable_temp_min_c: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("tolerable_temp_min_c", "tolerable_temp_min"),
+    )
+    tolerable_temp_max_c: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("tolerable_temp_max_c", "tolerable_temp_max"),
+    )
     rainfall_requirement_mm: float | None = Field(
         default=None,
         ge=0,
         validation_alias=AliasChoices("rainfall_requirement_mm", "rainfall_requirement"),
+    )
+    preferred_rainfall_min_mm: float | None = Field(
+        default=None,
+        ge=0,
+        validation_alias=AliasChoices("preferred_rainfall_min_mm", "preferred_rainfall_min"),
+    )
+    preferred_rainfall_max_mm: float | None = Field(
+        default=None,
+        ge=0,
+        validation_alias=AliasChoices("preferred_rainfall_max_mm", "preferred_rainfall_max"),
     )
     frost_tolerance_days: int | None = Field(
         default=None,
@@ -176,6 +194,30 @@ class CropProfileBase(BaseModel):
             and self.optimal_temp_min_c > self.optimal_temp_max_c
         ):
             raise ValueError("optimal_temp_min_c must be less than or equal to optimal_temp_max_c.")
+        if (
+            self.tolerable_temp_min_c is not None
+            and self.tolerable_temp_max_c is not None
+            and self.tolerable_temp_min_c > self.tolerable_temp_max_c
+        ):
+            raise ValueError("tolerable_temp_min_c must be less than or equal to tolerable_temp_max_c.")
+        if (
+            self.tolerable_temp_min_c is not None
+            and self.optimal_temp_min_c is not None
+            and self.tolerable_temp_min_c > self.optimal_temp_min_c
+        ):
+            raise ValueError("tolerable_temp_min_c must be less than or equal to optimal_temp_min_c.")
+        if (
+            self.optimal_temp_max_c is not None
+            and self.tolerable_temp_max_c is not None
+            and self.optimal_temp_max_c > self.tolerable_temp_max_c
+        ):
+            raise ValueError("optimal_temp_max_c must be less than or equal to tolerable_temp_max_c.")
+        if (
+            self.preferred_rainfall_min_mm is not None
+            and self.preferred_rainfall_max_mm is not None
+            and self.preferred_rainfall_min_mm > self.preferred_rainfall_max_mm
+        ):
+            raise ValueError("preferred_rainfall_min_mm must be less than or equal to preferred_rainfall_max_mm.")
         seen_stage_names: set[str] = set()
         for stage in self.growth_stages:
             normalized_name = stage.name.casefold()
@@ -252,7 +294,11 @@ class CropProfileRead(BaseModel):
     slope_tolerance: float | None
     optimal_temp_min_c: float | None
     optimal_temp_max_c: float | None
+    tolerable_temp_min_c: float | None
+    tolerable_temp_max_c: float | None
     rainfall_requirement_mm: float | None
+    preferred_rainfall_min_mm: float | None
+    preferred_rainfall_max_mm: float | None
     frost_tolerance_days: int | None
     heat_tolerance_days: int | None
     target_nitrogen_ppm: float | None

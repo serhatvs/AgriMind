@@ -184,6 +184,8 @@ def test_yield_prediction_contract_builds_input_and_adapts_output():
     assert adapted.field_id == 12
     assert adapted.crop_id == 7
     assert adapted.predicted_yield_per_hectare == 7.6
+    assert adapted.predicted_yield_min == 6.8
+    assert adapted.predicted_yield_max == 8.4
     assert adapted.predicted_yield_range.min == 6.8
     assert adapted.predicted_yield_range.max == 8.4
     assert adapted.confidence_score == 0.74
@@ -433,4 +435,5 @@ def test_economic_service_accepts_stub_predictor_using_new_protocol_only(db):
     assessment = service.calculate_profit(field, crop)
 
     assert stub.requests
-    assert assessment.estimated_profit == 10610.0
+    assert assessment.estimated_profit == 9980.0
+    assert assessment.yield_prediction is not None

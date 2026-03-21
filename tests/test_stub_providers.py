@@ -105,11 +105,11 @@ def test_stub_yield_predictor_returns_deterministic_request_result():
     first = provider.predict(request)
     second = provider.predict(request)
 
-    assert first.predicted_yield == 8.5
-    assert first.yield_range_min == 7.62
-    assert first.yield_range_max == 9.38
+    assert first.predicted_yield == 8.61
+    assert first.yield_range_min == 7.73
+    assert first.yield_range_max == 9.49
     assert first.confidence == 0.78
-    assert first.provider_name == "deterministic_stub_provider"
+    assert first.provider_name == "deterministic_yield_prediction"
     assert first.provider_version == "v1"
     assert first.generated_at.tzinfo is not None
     assert second.predicted_yield == first.predicted_yield
@@ -136,8 +136,8 @@ def test_stub_yield_predictor_predicts_from_input_without_db():
     first = provider.predict(request)
     second = provider.predict(request)
 
-    assert first.predicted_yield == 8.5
-    assert first.provider_name == "deterministic_stub_provider"
+    assert first.predicted_yield == 8.61
+    assert first.provider_name == "deterministic_yield_prediction"
     assert first.provider_version == "v1"
     assert second.predicted_yield == first.predicted_yield
 

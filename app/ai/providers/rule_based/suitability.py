@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from uuid import UUID
 
 from app.ai.contracts.suitability import SuitabilityProvider
-from app.ai.providers.rule_based.climate import score_climate_compatibility
+from app.ai.providers.rule_based.climate import assess_climate_compatibility
+from app.config import settings
 from app.engines.scoring_config import RangeBand, SalinityBand, SuitabilityScoringConfig, load_scoring_config
 from app.engines.scoring_types import (
     ScoreBlocker,
@@ -47,11 +49,13 @@ def _clamp_ratio(value: float) -> float:
     return max(0.0, min(value, 1.0))
 
 
-def _safe_soil_test_id(soil_test: SoilTest | None) -> int | None:
+def _safe_soil_test_id(soil_test: SoilTest | None) -> int | str | UUID | None:
     if soil_test is None:
         return None
     soil_test_id = getattr(soil_test, "id", None)
-    return soil_test_id if isinstance(soil_test_id, int) else None
+    if isinstance(soil_test_id, (int, str, UUID)):
+        return soil_test_id
+    return None
 
 
 def _dedupe_messages(messages: list[str]) -> list[str]:
@@ -601,22 +605,54 @@ class SuitabilityScorer:
     ) -> SuitabilityResult:
         """Score a single field for a selected crop."""
 
+        climate_assessment = assess_climate_compatibility(crop, climate_summary, self.config)
         score_breakdown = {
             "soil_compatibility": score_soil_compatibility(crop, soil_test, self.config),
             "ph_compatibility": score_ph_compatibility(crop, soil_test, self.config),
             "drainage_compatibility": score_drainage_compatibility(field_obj, crop, self.config),
             "water_availability_compatibility": score_water_availability(field_obj, crop, self.config),
             "slope_compatibility": score_slope_compatibility(field_obj, crop, self.config),
-            "climate_compatibility": score_climate_compatibility(crop, climate_summary, self.config),
+            "climate_compatibility": climate_assessment.component,
         }
 
         blockers = evaluate_blockers(field_obj, crop, soil_test, self.config)
         penalties = build_penalties(score_breakdown, blockers)
 
-        raw_total = sum(component.awarded_points for component in score_breakdown.values())
-        total_score = normalize_total_score(raw_total, self.config.max_total_points)
+        agronomic_keys = [key for key in score_breakdown if key != "climate_compatibility"]
+        agronomic_raw_total = sum(score_breakdown[key].awarded_points for key in agronomic_keys)
+        agronomic_max_points = sum(score_breakdown[key].max_points for key in agronomic_keys)
+        agronomic_score = normalize_total_score(agronomic_raw_total, agronomic_max_points)
+
+        climate_score = climate_assessment.climate_score
+        if climate_score is None:
+            total_score = agronomic_score
+        else:
+            total_weight = settings.AGRONOMIC_SCORE_WEIGHT + settings.CLIMATE_SCORE_WEIGHT
+            total_score = _round_points(
+                (
+                    (agronomic_score * settings.AGRONOMIC_SCORE_WEIGHT)
+                    + (climate_score * settings.CLIMATE_SCORE_WEIGHT)
+                )
+                / total_weight
+            )
         if blockers:
             total_score = 0.0
+
+        agronomic_confidence = 0.82 if soil_test is not None else 0.45
+        if climate_assessment.confidence_score is None:
+            confidence_score = agronomic_confidence
+        elif climate_score is None:
+            confidence_score = round(
+                min(agronomic_confidence, climate_assessment.confidence_score),
+                2,
+            )
+        else:
+            confidence_score = round(
+                (agronomic_confidence + climate_assessment.confidence_score) / 2.0,
+                2,
+            )
+        if blockers:
+            confidence_score = max(confidence_score, 0.88)
 
         reasons = _dedupe_messages(
             [
@@ -624,6 +660,7 @@ class SuitabilityScorer:
                 for component in score_breakdown.values()
                 for reason in component.reasons
             ]
+            + climate_assessment.reasons
             + [blocker.message for blocker in blockers]
         )
 
@@ -636,6 +673,13 @@ class SuitabilityScorer:
             penalties=penalties,
             blockers=blockers,
             reasons=reasons,
+            agronomic_score_value=agronomic_score,
+            climate_score_value=climate_score,
+            confidence_score=confidence_score,
+            climate_reasons=climate_assessment.reasons,
+            climate_strengths=climate_assessment.strengths,
+            climate_weaknesses=climate_assessment.weaknesses,
+            climate_risks=climate_assessment.risks,
         )
 
 

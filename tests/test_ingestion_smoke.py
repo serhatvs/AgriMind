@@ -439,3 +439,4 @@ def test_ingestion_pipeline_smoke_marks_run_failed_when_persistence_raises(db):
     assert failed_run.records_inserted == 0
     assert failed_run.records_skipped == 0
     assert len(raw_payloads) == 1
+    assert db.query(IngestionRun).filter(IngestionRun.status == IngestionRunStatus.RUNNING).count() == 0

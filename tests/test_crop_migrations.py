@@ -90,7 +90,11 @@ def test_crop_profile_migration_upgrade_and_downgrade(tmp_path):
     assert "water_requirement_level" in upgraded_columns
     assert "frost_sensitivity" in upgraded_columns
     assert "optimal_temp_min_c" in upgraded_columns
+    assert "tolerable_temp_min_c" in upgraded_columns
+    assert "tolerable_temp_max_c" in upgraded_columns
     assert "rainfall_requirement_mm" in upgraded_columns
+    assert "preferred_rainfall_min_mm" in upgraded_columns
+    assert "preferred_rainfall_max_mm" in upgraded_columns
     assert "created_at" in upgraded_columns
     assert "name" not in upgraded_columns
     assert "min_nitrogen_ppm" not in upgraded_columns
@@ -114,7 +118,11 @@ def test_crop_profile_migration_upgrade_and_downgrade(tmp_path):
                     slope_tolerance,
                     optimal_temp_min_c,
                     optimal_temp_max_c,
+                    tolerable_temp_min_c,
+                    tolerable_temp_max_c,
                     rainfall_requirement_mm,
+                    preferred_rainfall_min_mm,
+                    preferred_rainfall_max_mm,
                     frost_tolerance_days,
                     heat_tolerance_days,
                     organic_matter_preference,
@@ -141,7 +149,11 @@ def test_crop_profile_migration_upgrade_and_downgrade(tmp_path):
     assert row["slope_tolerance"] == 10.0
     assert row["optimal_temp_min_c"] is None
     assert row["optimal_temp_max_c"] is None
+    assert row["tolerable_temp_min_c"] is None
+    assert row["tolerable_temp_max_c"] is None
     assert row["rainfall_requirement_mm"] is None
+    assert row["preferred_rainfall_min_mm"] is None
+    assert row["preferred_rainfall_max_mm"] is None
     assert row["frost_tolerance_days"] is None
     assert row["heat_tolerance_days"] is None
     assert row["organic_matter_preference"] == "moderate"
@@ -159,3 +171,5 @@ def test_crop_profile_migration_upgrade_and_downgrade(tmp_path):
     assert "crop_name" not in downgraded_columns
     assert "frost_sensitivity" not in downgraded_columns
     assert "optimal_temp_min_c" not in downgraded_columns
+    assert "tolerable_temp_min_c" not in downgraded_columns
+    assert "preferred_rainfall_min_mm" not in downgraded_columns

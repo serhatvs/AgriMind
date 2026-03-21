@@ -7,7 +7,8 @@ from pathlib import Path
 from app.ai.orchestration.yield_prediction import YieldPredictionOrchestrator
 from app.config import settings
 
-DEFAULT_MODEL_DIR = Path(settings.YIELD_MODEL_DIR)
+_configured_model_path = Path(settings.YIELD_MODEL_PATH)
+DEFAULT_MODEL_DIR = _configured_model_path.parent if _configured_model_path.suffix else _configured_model_path
 
 
 class YieldPredictionService(YieldPredictionOrchestrator):

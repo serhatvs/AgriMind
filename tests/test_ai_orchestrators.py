@@ -206,6 +206,8 @@ def test_yield_prediction_orchestrator_preserves_result_shape(db, tmp_path):
         "field_id",
         "crop_id",
         "predicted_yield_per_hectare",
+        "predicted_yield_min",
+        "predicted_yield_max",
         "predicted_yield_range",
         "confidence_score",
         "model_version",
@@ -256,6 +258,6 @@ def test_stub_providers_work_through_existing_orchestration_paths():
     ).generate_answer(system_prompt="system", user_prompt="user")
 
     assert prediction.model_version == "v1"
-    assert prediction.training_source == "deterministic_stub_provider"
+    assert prediction.training_source == "deterministic_heuristics"
     assert recommendation.explanation.short_explanation.startswith("Stub explanation:")
     assert answer.text == "Stub extraction result: placeholder response"

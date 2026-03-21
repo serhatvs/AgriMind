@@ -17,6 +17,7 @@ from app.seeds.data import SEED_TAG, SeedDataset, build_seed_dataset
 
 SEED_NAMESPACE = UUID("85c612cc-a746-4a40-b7ca-c50f9c58f0ac")
 REQUIRED_TABLES = ("fields", "soil_tests", "crop_profiles", "weather_history")
+OPTIONAL_TABLES = ("crop_economic_profiles",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,7 @@ class SeedTables:
     soil_tests: Table
     crop_profiles: Table
     weather_history: Table
+    crop_economic_profiles: Table | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +37,8 @@ class SeedSummary:
 
     crops_created: int
     crops_updated: int
+    economic_profiles_created: int
+    economic_profiles_updated: int
     fields_created: int
     fields_updated: int
     soil_tests_created: int
@@ -48,6 +52,7 @@ class SeedSummary:
         return (
             "Seed refresh complete: "
             f"5 crops ({self.crops_created} created, {self.crops_updated} updated), "
+            f"5 economic profiles ({self.economic_profiles_created} created, {self.economic_profiles_updated} updated), "
             f"10 fields ({self.fields_created} created, {self.fields_updated} updated), "
             f"10 soil tests ({self.soil_tests_created} created, {self.soil_tests_updated} updated), "
             f"{self.weather_rows_created + self.weather_rows_updated} weather rows "
@@ -96,7 +101,7 @@ def reflect_seed_tables(engine: Engine) -> SeedTables:
     """Reflect the live tables used by the demo seed runner."""
 
     metadata = MetaData()
-    metadata.reflect(bind=engine, only=REQUIRED_TABLES)
+    metadata.reflect(bind=engine, only=(*REQUIRED_TABLES, *OPTIONAL_TABLES))
     missing = [table_name for table_name in REQUIRED_TABLES if table_name not in metadata.tables]
     if missing:
         raise ValueError(f"Seed cannot run because required tables are missing: {', '.join(sorted(missing))}")
@@ -106,6 +111,7 @@ def reflect_seed_tables(engine: Engine) -> SeedTables:
         soil_tests=metadata.tables["soil_tests"],
         crop_profiles=metadata.tables["crop_profiles"],
         weather_history=metadata.tables["weather_history"],
+        crop_economic_profiles=metadata.tables.get("crop_economic_profiles"),
     )
 
 
@@ -159,6 +165,47 @@ def _seed_crop_profiles(session: Session, table: Table, dataset: SeedDataset) ->
                 "slope_tolerance": f"{spec.slope_tolerance:.1f}",
                 "organic_matter_preference": spec.organic_matter_preference,
                 "notes": _seed_note("crop", spec.slug, spec.description),
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        if action == "created":
+            created += 1
+        else:
+            updated += 1
+
+    return created, updated
+
+
+def _seed_crop_economic_profiles(
+    session: Session,
+    table: Table | None,
+    dataset: SeedDataset,
+) -> tuple[int, int]:
+    """Upsert crop-level economic profiles when the target table exists."""
+
+    if table is None:
+        return 0, 0
+
+    created = 0
+    updated = 0
+    now = _utcnow()
+
+    for spec in dataset.economic_profiles:
+        action = _upsert_row(
+            session,
+            table,
+            {
+                "id": _seed_uuid("crop_economic_profile", spec.crop_slug),
+                "crop_name": spec.crop_name,
+                "average_market_price_per_unit": spec.average_market_price_per_unit,
+                "price_unit": spec.price_unit,
+                "base_cost_per_hectare": spec.base_cost_per_hectare,
+                "irrigation_cost_factor": spec.irrigation_cost_factor,
+                "fertilizer_cost_factor": spec.fertilizer_cost_factor,
+                "labor_cost_factor": spec.labor_cost_factor,
+                "risk_cost_factor": spec.risk_cost_factor,
+                "region": spec.region,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -289,6 +336,11 @@ def run_seed(session: Session) -> SeedSummary:
     dataset = build_seed_dataset()
 
     crops_created, crops_updated = _seed_crop_profiles(session, tables.crop_profiles, dataset)
+    economic_profiles_created, economic_profiles_updated = _seed_crop_economic_profiles(
+        session,
+        tables.crop_economic_profiles,
+        dataset,
+    )
     fields_created, fields_updated = _seed_fields(session, tables.fields, dataset)
     soil_tests_created, soil_tests_updated = _seed_soil_tests(session, tables.soil_tests, dataset)
     weather_rows_created, weather_rows_updated = _seed_weather_history(session, tables.weather_history, dataset)
@@ -296,6 +348,8 @@ def run_seed(session: Session) -> SeedSummary:
     return SeedSummary(
         crops_created=crops_created,
         crops_updated=crops_updated,
+        economic_profiles_created=economic_profiles_created,
+        economic_profiles_updated=economic_profiles_updated,
         fields_created=fields_created,
         fields_updated=fields_updated,
         soil_tests_created=soil_tests_created,
