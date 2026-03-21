@@ -1,6 +1,7 @@
 """Pydantic schemas for crop agronomic requirement profiles."""
 
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -235,7 +236,7 @@ class CropProfileRead(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: int | str | UUID
     crop_name: str
     scientific_name: str | None
     ideal_ph_min: float
@@ -259,6 +260,6 @@ class CropProfileRead(BaseModel):
     target_potassium_ppm: float | None
     organic_matter_preference: CropPreferenceLevel | None
     notes: str | None
-    growth_stages: list[GrowthStageDefinition]
+    growth_stages: list[GrowthStageDefinition] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

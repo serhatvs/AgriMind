@@ -5,28 +5,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.ai.registry import get_ai_provider_registry
 from app.api import agri_assistant, crop_profiles, crops, dashboards, fields, ranking, recommendations, soil_tests
 from app.config import settings
-from app.database import Base, engine
-from app.models import (  # noqa: F401
-    crop_price,
-    crop_profile,
-    feedback,
-    field,
-    field_crop_cycle,
-    input_cost,
-    recommendation,
-    soil_test,
-    weather_history,
-)
+from app.db import check_database_connection, dispose_database_engine
+from app import models  # noqa: F401
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Validate external dependencies once when the application starts."""
+
+    _ = app
     get_ai_provider_registry().validate_configuration()
-    try:
-        Base.metadata.create_all(bind=engine)
-    except Exception:
-        pass
+    check_database_connection()
     yield
+    dispose_database_engine()
 
 
 def create_app() -> FastAPI:

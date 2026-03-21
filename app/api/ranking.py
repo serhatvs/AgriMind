@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.api.service_errors import raise_http_exception_for_service_error
 from app.database import get_db
 from app.schemas.ranking import RankFieldsRequest, RankFieldsResponse
 from app.services.ranking_service import get_ranked_fields_response
@@ -17,5 +18,5 @@ def rank_fields_endpoint(request: RankFieldsRequest, db: Session = Depends(get_d
             top_n=request.top_n,
             field_ids=request.field_ids,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as exc:
+        raise_http_exception_for_service_error(exc)

@@ -17,6 +17,12 @@ class ProviderSettingSpec:
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/agrimind"
+    DATABASE_ECHO: bool = False
+    DATABASE_POOL_PRE_PING: bool = True
+    DATABASE_POOL_SIZE: int = 5
+    DATABASE_MAX_OVERFLOW: int = 10
+    DATABASE_POOL_TIMEOUT_SECONDS: int = 30
+    DATABASE_CONNECT_TIMEOUT_SECONDS: int = 10
     APP_NAME: str = "AgriMind"
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"

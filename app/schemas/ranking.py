@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, PositiveInt
 
 from app.engines.scoring_types import ScoreStatus
@@ -15,9 +17,9 @@ class RankFieldsRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    crop_id: PositiveInt
-    top_n: int | None = 5
-    field_ids: list[PositiveInt] | None = None
+    crop_id: PositiveInt | str
+    top_n: PositiveInt | None = 5
+    field_ids: list[PositiveInt | str] | None = None
 
 
 class CropSummary(BaseModel):
@@ -25,7 +27,7 @@ class CropSummary(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: int | str | UUID
     crop_name: str
     scientific_name: str | None
 
@@ -72,7 +74,7 @@ class RankedFieldRecommendation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rank: int
-    field_id: int
+    field_id: int | str | UUID
     field_name: str
     total_score: float
     agronomic_score: float

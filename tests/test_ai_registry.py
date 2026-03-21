@@ -114,9 +114,21 @@ def test_main_lifespan_validates_ai_provider_configuration(monkeypatch):
         def validate_configuration(self) -> None:
             self.calls += 1
 
+    connection_checks = {"count": 0}
+    engine_disposals = {"count": 0}
+
     registry = _RecordingRegistry()
     monkeypatch.setattr(main, "get_ai_provider_registry", lambda: registry)
-    monkeypatch.setattr(main.Base.metadata, "create_all", lambda bind: None)
+    monkeypatch.setattr(
+        main,
+        "check_database_connection",
+        lambda: connection_checks.__setitem__("count", connection_checks["count"] + 1),
+    )
+    monkeypatch.setattr(
+        main,
+        "dispose_database_engine",
+        lambda: engine_disposals.__setitem__("count", engine_disposals["count"] + 1),
+    )
 
     async def _exercise() -> None:
         async with main.lifespan(main.app):
@@ -125,3 +137,5 @@ def test_main_lifespan_validates_ai_provider_configuration(monkeypatch):
     asyncio.run(_exercise())
 
     assert registry.calls == 1
+    assert connection_checks["count"] == 1
+    assert engine_disposals["count"] == 1

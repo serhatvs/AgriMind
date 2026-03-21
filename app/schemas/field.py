@@ -1,6 +1,7 @@
 """Pydantic schemas for field input and output contracts."""
 
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
@@ -85,19 +86,19 @@ class FieldRead(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: int | str | UUID
     name: str
-    location_name: str
+    location_name: str | None
     latitude: float | None
     longitude: float | None
-    area_hectares: float
+    area_hectares: float | None
     elevation_meters: float | None
-    slope_percent: float
+    slope_percent: float | None
     aspect: FieldAspect | None
     irrigation_available: bool
     water_source_type: WaterSourceType | None
-    infrastructure_score: int
-    drainage_quality: str
+    infrastructure_score: int | None
+    drainage_quality: str | None
     notes: str | None
     created_at: datetime
     updated_at: datetime

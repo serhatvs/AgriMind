@@ -7,8 +7,7 @@ from app.api.service_errors import raise_http_exception_for_service_error
 from app.database import get_db
 from app.schemas.field import FieldCreate, FieldRead, FieldUpdate
 from app.schemas.management import ManagementPlanRead
-from app.services import field_service
-from app.services.errors import NotFoundError
+from app.services import field_catalog_service
 from app.services.management_service import (
     MAX_PLAN_WEEKS,
     ManagementPlanConflictError,
@@ -22,22 +21,26 @@ router = APIRouter(prefix="/fields", tags=["fields"])
 @router.post("/", response_model=FieldRead, status_code=201)
 def create_field(field_data: FieldCreate, db: Session = Depends(get_db)):
     try:
-        return field_service.create_field(db, field_data)
+        return field_catalog_service.create_field(db, field_data)
     except Exception as exc:
         raise_http_exception_for_service_error(exc)
 
 
 @router.get("/", response_model=list[FieldRead])
-def list_fields(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    return field_service.get_fields(db, skip=skip, limit=limit)
+def list_fields(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    return field_catalog_service.list_fields(db, skip=skip, limit=limit)
 
 
 @router.get("/{field_id}", response_model=FieldRead)
-def get_field(field_id: int, db: Session = Depends(get_db)):
-    field = field_service.get_field(db, field_id)
-    if not field:
-        raise_http_exception_for_service_error(NotFoundError("Field not found"))
-    return field
+def get_field(field_id: str, db: Session = Depends(get_db)):
+    try:
+        return field_catalog_service.get_field(db, field_id)
+    except Exception as exc:
+        raise_http_exception_for_service_error(exc)
 
 
 @router.get("/{field_id}/management-plan", response_model=ManagementPlanRead)
@@ -61,16 +64,16 @@ def get_management_plan(
 
 
 @router.put("/{field_id}", response_model=FieldRead)
-def update_field(field_id: int, field_data: FieldUpdate, db: Session = Depends(get_db)):
+def update_field(field_id: str, field_data: FieldUpdate, db: Session = Depends(get_db)):
     try:
-        return field_service.update_field(db, field_id, field_data)
+        return field_catalog_service.update_field(db, field_id, field_data)
     except Exception as exc:
         raise_http_exception_for_service_error(exc)
 
 
 @router.delete("/{field_id}", status_code=204)
-def delete_field(field_id: int, db: Session = Depends(get_db)):
+def delete_field(field_id: str, db: Session = Depends(get_db)):
     try:
-        field_service.delete_field(db, field_id)
+        field_catalog_service.delete_field(db, field_id)
     except Exception as exc:
         raise_http_exception_for_service_error(exc)

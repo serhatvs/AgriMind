@@ -1,7 +1,7 @@
-"""Compatibility wrapper for the canonical database package."""
+"""Canonical database exports for engine, sessions, and ORM base metadata."""
 
-from app.db import (
-    Base,
+from app.db.base import Base
+from app.db.session import (
     SessionFactory,
     SessionLocal,
     build_engine_options,

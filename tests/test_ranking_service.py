@@ -18,6 +18,7 @@ from app.models.field import Field
 from app.models.input_cost import InputCost
 from app.models.soil_test import SoilTest
 from app.models.weather_history import WeatherHistory
+from app.services.errors import NotFoundError
 from app.services.ranking_service import get_ranked_fields_response
 
 
@@ -175,7 +176,7 @@ def test_get_ranked_fields_response_raises_when_no_fields_found(db):
     db.add(crop)
     db.commit()
 
-    with pytest.raises(ValueError, match="No fields found for ranking"):
+    with pytest.raises(NotFoundError, match="No fields found for ranking"):
         get_ranked_fields_response(db, crop_id=crop.id)
 
 
