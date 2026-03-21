@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy.orm import Session
 
 from app.ingestion.runners.registry import IngestionPipelineRegistry
@@ -27,7 +29,7 @@ class IngestionJobRunner:
 
     def run_data_source(
         self,
-        data_source_id: int,
+        data_source_id: UUID,
         *,
         run_type: IngestionRunType = IngestionRunType.FULL,
     ) -> IngestionExecutionResult:

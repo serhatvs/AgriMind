@@ -10,6 +10,12 @@ from collections.abc import Sequence
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
+from app.ingestion.runners.runtime import (
+    RunnerExitCode,
+    configure_runner_logging,
+    exit_code_for_summary,
+    log_event,
+)
 from app.ingestion.runners.source_registry import (
     IngestionSourceRunnerRegistry,
     build_default_source_runner_registry,
@@ -19,6 +25,7 @@ from app.models.enums import IngestionRunType, IngestionRunStatus
 
 
 logger = logging.getLogger(__name__)
+SKIPPED_SOURCE_STATUS = "skipped"
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +48,7 @@ class RunAllSummary:
     succeeded_sources: int
     partial_sources: int
     failed_sources: int
+    skipped_sources: int
     reports: tuple[SourceRunReport, ...]
 
 
@@ -83,7 +91,12 @@ def execute_all_ingestions(
         registry.ensure_registered_sources(repository)
 
     active_data_sources = repository.list_active_data_sources()
-    logger.info("Found %s active ingestion data source(s)", len(active_data_sources))
+    log_event(
+        logger,
+        logging.INFO,
+        "ingestion_run_all_discovered_sources",
+        total_active_sources=len(active_data_sources),
+    )
 
     reports: list[SourceRunReport] = []
     for data_source in active_data_sources:
@@ -91,7 +104,15 @@ def execute_all_ingestions(
             source_definition = registry.get(data_source.source_name)
         except KeyError as exc:
             error_message = str(exc)
-            logger.error("No runner registered for active data source '%s'", data_source.source_name)
+            log_event(
+                logger,
+                logging.ERROR,
+                "ingestion_source_failed",
+                source_name=data_source.source_name,
+                status=IngestionRunStatus.FAILED.value,
+                error_message=error_message,
+                reason="no_registered_runner",
+            )
             reports.append(
                 SourceRunReport(
                     source_name=data_source.source_name,
@@ -101,7 +122,29 @@ def execute_all_ingestions(
             )
             continue
 
-        logger.info("Running ingestion source '%s'", data_source.source_name)
+        if not source_definition.is_enabled:
+            log_event(
+                logger,
+                logging.INFO,
+                "ingestion_source_skipped",
+                source_name=data_source.source_name,
+                reason="disabled_by_config",
+            )
+            reports.append(
+                SourceRunReport(
+                    source_name=data_source.source_name,
+                    status=SKIPPED_SOURCE_STATUS,
+                )
+            )
+            continue
+
+        log_event(
+            logger,
+            logging.INFO,
+            "ingestion_source_started",
+            source_name=data_source.source_name,
+            run_type=run_type,
+        )
         try:
             result = source_definition.executor(
                 db,
@@ -110,6 +153,14 @@ def execute_all_ingestions(
                 data_source=data_source,
             )
         except Exception as exc:
+            log_event(
+                logger,
+                logging.ERROR,
+                "ingestion_source_failed",
+                source_name=data_source.source_name,
+                status=IngestionRunStatus.FAILED.value,
+                error_message=str(exc),
+            )
             logger.exception("Ingestion source '%s' failed", data_source.source_name)
             reports.append(
                 SourceRunReport(
@@ -130,13 +181,15 @@ def execute_all_ingestions(
                 error_message=result.error_message,
             )
         )
-        logger.info(
-            "Completed source '%s' with status=%s fetched=%s inserted=%s skipped=%s",
-            data_source.source_name,
-            result.status.value,
-            result.records_fetched,
-            result.records_inserted,
-            result.records_skipped,
+        log_event(
+            logger,
+            logging.INFO,
+            "ingestion_source_completed",
+            source_name=data_source.source_name,
+            status=result.status.value,
+            records_fetched=result.records_fetched,
+            records_inserted=result.records_inserted,
+            records_skipped=result.records_skipped,
         )
 
     summary = _build_summary(reports)
@@ -148,32 +201,40 @@ def _build_summary(reports: Sequence[SourceRunReport]) -> RunAllSummary:
     succeeded_sources = sum(1 for report in reports if report.status == IngestionRunStatus.SUCCEEDED.value)
     partial_sources = sum(1 for report in reports if report.status == IngestionRunStatus.PARTIAL.value)
     failed_sources = sum(1 for report in reports if report.status == IngestionRunStatus.FAILED.value)
+    skipped_sources = sum(1 for report in reports if report.status == SKIPPED_SOURCE_STATUS)
     return RunAllSummary(
         total_sources=len(reports),
         succeeded_sources=succeeded_sources,
         partial_sources=partial_sources,
         failed_sources=failed_sources,
+        skipped_sources=skipped_sources,
         reports=tuple(reports),
     )
 
 
 def _log_summary(summary: RunAllSummary) -> None:
-    logger.info(
-        "Ingestion summary: total=%s succeeded=%s partial=%s failed=%s",
-        summary.total_sources,
-        summary.succeeded_sources,
-        summary.partial_sources,
-        summary.failed_sources,
+    log_event(
+        logger,
+        logging.INFO,
+        "ingestion_run_all_summary",
+        total_sources=summary.total_sources,
+        succeeded_sources=summary.succeeded_sources,
+        partial_sources=summary.partial_sources,
+        failed_sources=summary.failed_sources,
+        skipped_sources=summary.skipped_sources,
     )
     for report in summary.reports:
-        logger.info(
-            "Source summary: name=%s status=%s fetched=%s inserted=%s skipped=%s error=%s",
-            report.source_name,
-            report.status,
-            report.records_fetched,
-            report.records_inserted,
-            report.records_skipped,
-            report.error_message,
+        level = logging.ERROR if report.status == IngestionRunStatus.FAILED.value else logging.INFO
+        log_event(
+            logger,
+            level,
+            "ingestion_source_summary",
+            source_name=report.source_name,
+            status=report.status,
+            records_fetched=report.records_fetched,
+            records_inserted=report.records_inserted,
+            records_skipped=report.records_skipped,
+            error_message=report.error_message,
         )
 
 
@@ -182,23 +243,38 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_argument_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
-    logging.basicConfig(
-        level=getattr(logging, args.log_level, logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    configure_runner_logging(args.log_level)
 
     db = SessionLocal()
     try:
+        log_event(
+            logger,
+            logging.INFO,
+            "ingestion_run_all_started",
+            run_type=args.run_type,
+        )
         summary = execute_all_ingestions(
             db,
             run_type=IngestionRunType(args.run_type),
         )
-    except Exception:
+        return int(
+            exit_code_for_summary(
+                failed_sources=summary.failed_sources,
+                partial_sources=summary.partial_sources,
+            )
+        )
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            "ingestion_run_all_failed",
+            run_type=args.run_type,
+            error_message=str(exc),
+        )
         logger.exception("Unified ingestion runner failed")
-        return 1
+        return int(RunnerExitCode.FAILURE)
     finally:
         db.close()
-    return 1 if summary.failed_sources > 0 else 0
 
 
 if __name__ == "__main__":

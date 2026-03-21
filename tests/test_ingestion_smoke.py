@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -135,11 +136,10 @@ def _build_nasa_payload(
                 "T2M_MIN": select_dates({"20250101": 10.0, "20250102": 11.0, "20250103": 12.0}),
                 "T2M_MAX": select_dates({"20250101": 20.0, "20250102": 21.0, "20250103": 22.0}),
                 "T2M": select_dates({"20250101": 15.0, "20250102": 16.0, "20250103": 17.0}),
-                "PRECTOTCORR": select_dates({"20250101": 3.2, "20250102": 0.0, "20250103": 1.4}),
+                "PRECTOT": select_dates({"20250101": 3.2, "20250102": 0.0, "20250103": 1.4}),
                 "RH2M": humidity_series,
                 "WS2M": select_dates({"20250101": 4.6, "20250102": 5.1, "20250103": 4.9}),
                 "ALLSKY_SFC_SW_DWN": select_dates({"20250101": 12.3, "20250102": 11.1, "20250103": 12.8}),
-                "EVPTRNS": select_dates({"20250101": 2.3, "20250102": 2.5, "20250103": 2.4}),
             }
         }
     }
@@ -271,7 +271,7 @@ def test_weather_ingestion_smoke_transforms_validates_deduplicates_and_inserts_r
         base_url="https://power.example.test",
         is_active=True,
     )
-    ingestion_run = IngestionRun(data_source_id=1, run_type=IngestionRunType.INCREMENTAL)
+    ingestion_run = IngestionRun(data_source_id=uuid4(), run_type=IngestionRunType.INCREMENTAL)
 
     transformed_records = transformer.transform(
         payload,
@@ -345,7 +345,7 @@ def test_nasa_power_runner_smoke_executes_end_to_end_with_mocked_client(db, fiel
 
 
 def test_faostat_runner_smoke_executes_end_to_end_with_mocked_client(db):
-    bulk_client = _StaticFAOSTATClient(_build_faostat_rows())
+    api_client = _StaticFAOSTATClient(_build_faostat_rows())
 
     result = execute_faostat_ingestion(
         db,
@@ -355,7 +355,7 @@ def test_faostat_runner_smoke_executes_end_to_end_with_mocked_client(db):
         crops=["Maize"],
         batch_size=2,
         run_type=IngestionRunType.BACKFILL,
-        bulk_client=bulk_client,
+        api_client=api_client,
     )
 
     ingestion_run = db.get(IngestionRun, result.ingestion_run_id)
@@ -385,7 +385,7 @@ def test_faostat_runner_smoke_executes_end_to_end_with_mocked_client(db):
     assert len(statistics_rows) == 3
     assert statistics_rows[0].country == "United States of America"
     assert statistics_rows[0].crop_name == "Maize"
-    assert bulk_client.calls[0]["countries"] == ("United States of America",)
+    assert api_client.calls[0]["countries"] == ("United States of America",)
 
 
 def test_ingestion_pipeline_smoke_marks_run_failed_when_persistence_raises(db):

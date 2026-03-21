@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from typing import Protocol
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -63,7 +64,7 @@ class IngestionPipelineService:
 
     def run(
         self,
-        data_source_id: int,
+        data_source_id: UUID,
         *,
         run_type: IngestionRunType = IngestionRunType.FULL,
         metadata_json: dict[str, JSONValue] | None = None,

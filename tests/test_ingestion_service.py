@@ -1,9 +1,10 @@
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import MetaData, create_engine, inspect, text
 
 from app.ingestion.clients.base import IngestionClient
 from app.ingestion.runners.job_runner import IngestionJobRunner
@@ -241,80 +242,48 @@ def test_ingestion_foundation_migration_upgrade_and_downgrade(tmp_path):
     assert "ingestion_runs" in tables
     assert "raw_ingestion_payloads" in tables
 
+    metadata = MetaData()
+    metadata.reflect(bind=engine, only=("data_sources", "ingestion_runs", "raw_ingestion_payloads"))
+    data_sources_table = metadata.tables["data_sources"]
+    ingestion_runs_table = metadata.tables["ingestion_runs"]
+    raw_payloads_table = metadata.tables["raw_ingestion_payloads"]
+    data_source_id = uuid4().hex
+
     with engine.begin() as connection:
         connection.execute(
-            text(
-                """
-                INSERT INTO data_sources (
-                    id,
-                    source_name,
-                    source_type,
-                    base_url,
-                    is_active,
-                    created_at,
-                    updated_at
-                ) VALUES (
-                    1,
-                    'Weather API',
-                    'api',
-                    'https://example.test/weather',
-                    1,
-                    CURRENT_TIMESTAMP,
-                    CURRENT_TIMESTAMP
-                )
-                """
+            data_sources_table.insert().values(
+                id=data_source_id,
+                source_name="Weather API",
+                source_type="api",
+                base_url="https://example.test/weather",
+                is_active=True,
+                created_at=text("CURRENT_TIMESTAMP"),
+                updated_at=text("CURRENT_TIMESTAMP"),
             )
         )
         connection.execute(
-            text(
-                """
-                INSERT INTO ingestion_runs (
-                    id,
-                    data_source_id,
-                    run_type,
-                    status,
-                    started_at,
-                    finished_at,
-                    records_fetched,
-                    records_inserted,
-                    records_skipped,
-                    error_message,
-                    metadata_json
-                ) VALUES (
-                    1,
-                    1,
-                    'full',
-                    'succeeded',
-                    CURRENT_TIMESTAMP,
-                    CURRENT_TIMESTAMP,
-                    12,
-                    10,
-                    2,
-                    NULL,
-                    '{}'
-                )
-                """
+            ingestion_runs_table.insert().values(
+                id=1,
+                data_source_id=data_source_id,
+                run_type="full",
+                status="succeeded",
+                started_at=text("CURRENT_TIMESTAMP"),
+                finished_at=text("CURRENT_TIMESTAMP"),
+                records_fetched=12,
+                records_inserted=10,
+                records_skipped=2,
+                error_message=None,
+                metadata_json={},
             )
         )
         connection.execute(
-            text(
-                """
-                INSERT INTO raw_ingestion_payloads (
-                    id,
-                    ingestion_run_id,
-                    payload_type,
-                    source_identifier,
-                    raw_json,
-                    created_at
-                ) VALUES (
-                    1,
-                    1,
-                    'json',
-                    'weather-1',
-                    '{"rainfall_mm": 12.4}',
-                    CURRENT_TIMESTAMP
-                )
-                """
+            raw_payloads_table.insert().values(
+                id=1,
+                ingestion_run_id=1,
+                payload_type="json",
+                source_identifier="weather-1",
+                raw_json={"rainfall_mm": 12.4},
+                created_at=text("CURRENT_TIMESTAMP"),
             )
         )
 

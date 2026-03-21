@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     NASA_POWER_DEFAULT_LOOKBACK_DAYS: int = 30
     NASA_POWER_TIME_STANDARD: str = "UTC"
     FAOSTAT_SOURCE_NAME: str = "FAOSTAT Crops and Livestock"
+    FAOSTAT_API_BASE_URL: str = "https://faostatservices.fao.org/api/v1/en/data/QCL"
+    FAOSTAT_API_TOKEN: str | None = None
     FAOSTAT_BULK_DOWNLOAD_URL: str = (
         "https://fenixservices.fao.org/faostat/static/bulkdownloads/"
         "Production_Crops_Livestock_E_All_Data_(Normalized).zip"
@@ -58,6 +60,9 @@ class Settings(BaseSettings):
     FAOSTAT_BATCH_SIZE: int = 500
     FAOSTAT_DEFAULT_COUNTRIES: str = ""
     FAOSTAT_DEFAULT_CROPS: str = ""
+    INGESTION_LOG_FORMAT: str = "json"
+    INGESTION_ENABLED_SOURCES: str = ""
+    INGESTION_DISABLED_SOURCES: str = ""
 
     _PROVIDER_SETTING_SPECS: ClassVar[dict[str, ProviderSettingSpec]] = {
         "yield": ProviderSettingSpec(
@@ -140,6 +145,16 @@ class Settings(BaseSettings):
             raise ValueError("FAOSTAT_BATCH_SIZE must be greater than 0")
         return value
 
+    @field_validator("INGESTION_LOG_FORMAT")
+    @classmethod
+    def validate_ingestion_log_format(cls, value: str) -> str:
+        """Normalize and validate the ingestion CLI log output format."""
+
+        normalized = value.strip().lower()
+        if normalized not in {"json", "text"}:
+            raise ValueError("INGESTION_LOG_FORMAT must be either 'json' or 'text'")
+        return normalized
+
     @model_validator(mode="after")
     def normalize_provider_settings(self) -> Self:
         """Resolve provider aliases into canonical AI_* settings."""
@@ -147,6 +162,21 @@ class Settings(BaseSettings):
         for spec in self._PROVIDER_SETTING_SPECS.values():
             resolved_value = self._resolve_provider_setting(spec)
             setattr(self, spec.canonical_field, resolved_value)
+        return self
+
+    @model_validator(mode="after")
+    def validate_ingestion_source_filters(self) -> Self:
+        """Reject overlapping enabled and disabled ingestion source lists."""
+
+        overlapping_sources = self.get_ingestion_enabled_sources().intersection(
+            self.get_ingestion_disabled_sources()
+        )
+        if overlapping_sources:
+            duplicates = ", ".join(sorted(overlapping_sources))
+            raise ValueError(
+                "INGESTION_ENABLED_SOURCES and INGESTION_DISABLED_SOURCES "
+                f"cannot overlap: {duplicates}"
+            )
         return self
 
     def _resolve_provider_setting(self, spec: ProviderSettingSpec) -> str:
@@ -184,6 +214,45 @@ class Settings(BaseSettings):
 
         allowed_values = ", ".join(spec.allowed_values)
         raise ValueError(f"{source_name} cannot be blank. Allowed values: {allowed_values}")
+
+    @staticmethod
+    def _normalize_source_name(source_name: str) -> str:
+        """Normalize a source name for case-insensitive config matching."""
+
+        return source_name.strip().casefold()
+
+    def _parse_source_name_csv(self, raw_value: str) -> frozenset[str]:
+        """Parse a comma-separated source-name setting into normalized names."""
+
+        names = {
+            self._normalize_source_name(part)
+            for part in raw_value.split(",")
+            if part.strip()
+        }
+        return frozenset(names)
+
+    def get_ingestion_enabled_sources(self) -> frozenset[str]:
+        """Return the normalized allowlist of enabled ingestion source names."""
+
+        return self._parse_source_name_csv(self.INGESTION_ENABLED_SOURCES)
+
+    def get_ingestion_disabled_sources(self) -> frozenset[str]:
+        """Return the normalized denylist of disabled ingestion source names."""
+
+        return self._parse_source_name_csv(self.INGESTION_DISABLED_SOURCES)
+
+    def is_ingestion_source_enabled(self, source_name: str, *, default_enabled: bool = True) -> bool:
+        """Return whether an ingestion source is enabled by config."""
+
+        normalized_name = self._normalize_source_name(source_name)
+        if normalized_name in self.get_ingestion_disabled_sources():
+            return False
+
+        enabled_sources = self.get_ingestion_enabled_sources()
+        if enabled_sources:
+            return normalized_name in enabled_sources
+
+        return default_enabled
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

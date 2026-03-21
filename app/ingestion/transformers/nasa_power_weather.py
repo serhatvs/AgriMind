@@ -24,11 +24,10 @@ class NASAPowerWeatherTransformer(PayloadTransformer):
         "T2M_MIN": "min_temp",
         "T2M_MAX": "max_temp",
         "T2M": "avg_temp",
-        "PRECTOTCORR": "rainfall_mm",
+        "PRECTOT": "rainfall_mm",
         "RH2M": "humidity",
         "WS2M": "wind_speed",
         "ALLSKY_SFC_SW_DWN": "solar_radiation",
-        "EVPTRNS": "et0",
     }
     MISSING_SENTINELS = {None, "", -999, -999.0, -99, -99.0, "-999", "-99"}
 

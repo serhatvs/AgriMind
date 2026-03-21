@@ -28,11 +28,10 @@ class NASAPowerAPIClient:
         "T2M_MIN",
         "T2M_MAX",
         "T2M",
-        "PRECTOTCORR",
-        "RH2M",
+        "PRECTOT",
         "WS2M",
+        "RH2M",
         "ALLSKY_SFC_SW_DWN",
-        "EVPTRNS",
     )
 
     def __init__(

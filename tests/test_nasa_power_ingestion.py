@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from uuid import uuid4
 
 import httpx
 
@@ -54,11 +55,10 @@ def _build_nasa_payload() -> dict[str, object]:
                 "T2M_MIN": {"20250101": 10.0, "20250102": 11.0},
                 "T2M_MAX": {"20250101": 20.0, "20250102": 21.0},
                 "T2M": {"20250101": 15.0, "20250102": 16.0},
-                "PRECTOTCORR": {"20250101": 3.2, "20250102": 0.0},
+                "PRECTOT": {"20250101": 3.2, "20250102": 0.0},
                 "RH2M": {"20250101": 71.0, "20250102": 69.0},
                 "WS2M": {"20250101": 4.6, "20250102": 5.1},
                 "ALLSKY_SFC_SW_DWN": {"20250101": 12.3, "20250102": -999.0},
-                "EVPTRNS": {"20250101": 2.3, "20250102": 2.5},
             }
         }
     }
@@ -88,7 +88,7 @@ def _build_runtime_records() -> tuple[DataSource, IngestionRun]:
         is_active=True,
     )
     ingestion_run = IngestionRun(
-        data_source_id=1,
+        data_source_id=uuid4(),
         run_type=IngestionRunType.INCREMENTAL,
     )
     return data_source, ingestion_run
@@ -116,7 +116,7 @@ def test_nasa_power_api_client_fetches_daily_weather_with_expected_query():
     assert captured["params"]["end"] == "20250102"
     assert captured["params"]["community"] == settings.NASA_POWER_COMMUNITY
     assert captured["params"]["time-standard"] == settings.NASA_POWER_TIME_STANDARD
-    assert "T2M_MIN" in captured["params"]["parameters"]
+    assert captured["params"]["parameters"] == "T2M_MIN,T2M_MAX,T2M,PRECTOT,WS2M,RH2M,ALLSKY_SFC_SW_DWN"
 
 
 def test_nasa_power_weather_transformer_maps_daily_rows():
@@ -146,7 +146,7 @@ def test_nasa_power_weather_transformer_maps_daily_rows():
     assert records[0].values["weather_date"] == date(2025, 1, 1)
     assert records[0].values["rainfall_mm"] == 3.2
     assert records[1].values["solar_radiation"] is None
-    assert records[1].values["et0"] == 2.5
+    assert "et0" not in records[1].values
 
 
 def test_weather_history_writer_skips_existing_and_in_batch_duplicates(db):

@@ -12,6 +12,13 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import SessionLocal
 from app.ingestion.clients import NASAPowerAPIClient, NASAPowerIngestionClient
+from app.ingestion.runners.runtime import (
+    RunnerExitCode,
+    configure_runner_logging,
+    exit_code_for_exception,
+    exit_code_for_run_status,
+    log_event,
+)
 from app.ingestion.runners.source_registry import IngestionSourceDefinition
 from app.ingestion.services import (
     FieldCoordinateService,
@@ -162,6 +169,8 @@ def build_nasa_power_source_definition() -> IngestionSourceDefinition:
         source_type=DataSourceType.API,
         base_url=settings.NASA_POWER_BASE_URL,
         executor=execute_registered_nasa_power_ingestion,
+        default_is_active=settings.is_ingestion_source_enabled(settings.NASA_POWER_SOURCE_NAME),
+        is_enabled=settings.is_ingestion_source_enabled(settings.NASA_POWER_SOURCE_NAME),
     )
 
 
@@ -170,26 +179,66 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_argument_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
-    logging.basicConfig(
-        level=getattr(logging, args.log_level, logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    configure_runner_logging(args.log_level)
+
+    source_definition = build_nasa_power_source_definition()
+    if not source_definition.is_enabled:
+        log_event(
+            logger,
+            logging.INFO,
+            "ingestion_runner_skipped",
+            runner="nasa_power",
+            source_name=source_definition.source_name,
+            reason="disabled_by_config",
+        )
+        return int(RunnerExitCode.SUCCESS)
 
     db = SessionLocal()
     try:
-        execute_nasa_power_ingestion(
+        log_event(
+            logger,
+            logging.INFO,
+            "ingestion_runner_started",
+            runner="nasa_power",
+            source_name=source_definition.source_name,
+            run_type=args.run_type,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            days=args.days,
+        )
+        result = execute_nasa_power_ingestion(
             db,
             start_date=args.start_date,
             end_date=args.end_date,
             days=args.days,
             run_type=IngestionRunType(args.run_type),
         )
-    except Exception:
+        log_event(
+            logger,
+            logging.INFO,
+            "ingestion_runner_completed",
+            runner="nasa_power",
+            source_name=source_definition.source_name,
+            status=result.status,
+            records_fetched=result.records_fetched,
+            records_inserted=result.records_inserted,
+            records_skipped=result.records_skipped,
+            ingestion_run_id=result.ingestion_run_id,
+        )
+        return int(exit_code_for_run_status(result.status))
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            "ingestion_runner_failed",
+            runner="nasa_power",
+            source_name=source_definition.source_name,
+            error_message=str(exc),
+        )
         logger.exception("NASA POWER ingestion failed")
-        return 1
+        return int(exit_code_for_exception(exc))
     finally:
         db.close()
-    return 0
 
 
 if __name__ == "__main__":

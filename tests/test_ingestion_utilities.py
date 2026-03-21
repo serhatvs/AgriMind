@@ -101,7 +101,7 @@ def test_external_statistics_duplicate_strategy_normalizes_statistic_types():
             source_identifier="us:maize:2023:production",
             record_type="external_crop_statistics",
             values={
-                "source_name": "FAOSTAT",
+                "source_name": "Mirror Feed",
                 "country": "United States of America",
                 "year": 2023,
                 "crop_name": "Maize",

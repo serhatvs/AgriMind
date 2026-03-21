@@ -43,7 +43,7 @@ def test_external_crop_statistics_migration_upgrade_and_downgrade(tmp_path):
         constraint["name"]
         for constraint in inspector.get_unique_constraints("external_crop_statistics")
     }
-    assert "uq_external_crop_statistics_source_country_year_crop_stat" in unique_constraints
+    assert "uq_external_crop_statistics_country_year_crop_stat" in unique_constraints
 
     with engine.begin() as connection:
         connection.execute(

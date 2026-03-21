@@ -37,7 +37,6 @@ class ExternalCropStatisticsDuplicateStrategy:
 
     def build_key(self, row: Mapping[str, Any]) -> Hashable:
         return (
-            str(row["source_name"]),
             str(row["country"]),
             int(row["year"]),
             str(row["crop_name"]),
@@ -52,7 +51,7 @@ class ExternalCropStatisticsDuplicateStrategy:
             code="duplicate_record",
             message=(
                 "Duplicate external crop statistic for "
-                f"{row['source_name']} / {row['country']} / {row['year']} / "
+                f"{row['country']} / {row['year']} / "
                 f"{row['crop_name']} / {self._normalize_statistic_type(row['statistic_type'])}"
             ),
             field_name="statistic_type",

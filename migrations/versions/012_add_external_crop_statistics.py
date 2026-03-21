@@ -44,12 +44,11 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
-            "source_name",
             "country",
             "year",
             "crop_name",
             "statistic_type",
-            name="uq_external_crop_statistics_source_country_year_crop_stat",
+            name="uq_external_crop_statistics_country_year_crop_stat",
         ),
     )
     op.create_index(op.f("ix_external_crop_statistics_country"), "external_crop_statistics", ["country"], unique=False)

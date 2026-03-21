@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Mapping, TypeAlias
+from uuid import UUID
 
 from app.models.enums import IngestionPayloadType, IngestionRunStatus
 
@@ -110,7 +111,7 @@ class IngestionExecutionResult:
     """Summary returned when an ingestion pipeline completes."""
 
     ingestion_run_id: int
-    data_source_id: int
+    data_source_id: UUID
     status: IngestionRunStatus
     records_fetched: int
     records_inserted: int

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import io
-import zipfile
+from uuid import uuid4
 
 import httpx
 
 from app.config import settings
-from app.ingestion.clients.faostat import FAOSTATBulkDownloadClient
+from app.ingestion.clients.faostat import FAOSTATAPIClient
 from app.ingestion.runners.run_faostat import execute_faostat_ingestion
 from app.ingestion.services.external_crop_statistics_writer import ExternalCropStatisticsWriter
 from app.ingestion.transformers.faostat_statistics import FAOSTATStatisticsTransformer
@@ -33,7 +32,6 @@ class _StaticFAOSTATClient:
         end_year: int,
         countries=None,
         crops=None,
-        elements=None,
         base_url: str | None = None,
     ):
         self.calls.append(
@@ -42,7 +40,6 @@ class _StaticFAOSTATClient:
                 "end_year": end_year,
                 "countries": tuple(countries or ()),
                 "crops": tuple(crops or ()),
-                "elements": tuple(elements or ()),
                 "base_url": base_url,
             }
         )
@@ -52,103 +49,61 @@ class _StaticFAOSTATClient:
 def _build_faostat_rows() -> list[dict[str, str]]:
     return [
         {
-            "Area Code": "231",
-            "Area Code (M49)": "'840",
             "Area": "United States of America",
-            "Item Code": "56",
-            "Item Code (CPC)": "'01313",
             "Item": "Maize",
-            "Element Code": "5510",
             "Element": "Production",
-            "Year Code": "2023",
             "Year": "2023",
             "Unit": "t",
             "Value": "389694720.000000",
-            "Flag": "A",
-            "Note": "",
         },
         {
-            "Area Code": "231",
-            "Area Code (M49)": "'840",
             "Area": "United States of America",
-            "Item Code": "56",
-            "Item Code (CPC)": "'01313",
             "Item": "Maize",
-            "Element Code": "5412",
             "Element": "Yield",
-            "Year Code": "2023",
             "Year": "2023",
             "Unit": "kg/ha",
             "Value": "11123.200000",
-            "Flag": "A",
-            "Note": "",
         },
         {
-            "Area Code": "231",
-            "Area Code (M49)": "'840",
             "Area": "United States of America",
-            "Item Code": "56",
-            "Item Code (CPC)": "'01313",
             "Item": "Maize",
-            "Element Code": "5312",
             "Element": "Area harvested",
-            "Year Code": "2023",
             "Year": "2023",
             "Unit": "ha",
             "Value": "35034000.000000",
-            "Flag": "A",
-            "Note": "",
         },
     ]
 
 
-def _build_faostat_zip() -> bytes:
-    csv_content = io.StringIO()
-    csv_content.write(
-        "Area Code,Area Code (M49),Area,Item Code,Item Code (CPC),Item,"
-        "Element Code,Element,Year Code,Year,Unit,Value,Flag,Note\r\n"
-    )
-    for row in _build_faostat_rows():
-        csv_content.write(
-            (
-                f"\"{row['Area Code']}\",\"{row['Area Code (M49)']}\",\"{row['Area']}\","
-                f"\"{row['Item Code']}\",\"{row['Item Code (CPC)']}\",\"{row['Item']}\","
-                f"\"{row['Element Code']}\",\"{row['Element']}\",\"{row['Year Code']}\","
-                f"\"{row['Year']}\",\"{row['Unit']}\",\"{row['Value']}\",\"{row['Flag']}\",\"{row['Note']}\"\r\n"
-            )
-        )
-
-    archive_buffer = io.BytesIO()
-    with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(
-            "Production_Crops_Livestock_E_All_Data_(Normalized).csv",
-            csv_content.getvalue(),
-        )
-    return archive_buffer.getvalue()
+def _build_faostat_api_response() -> dict[str, object]:
+    return {
+        "data": _build_faostat_rows(),
+    }
 
 
 def _build_runtime_records() -> tuple[DataSource, IngestionRun]:
     data_source = DataSource(
         source_name="FAOSTAT",
-        source_type=DataSourceType.FILE,
-        base_url="https://faostat.example.test/qcl.zip",
+        source_type=DataSourceType.API,
+        base_url="https://faostat.example.test/api/v1/en/data/QCL",
         is_active=True,
     )
     ingestion_run = IngestionRun(
-        data_source_id=1,
+        data_source_id=uuid4(),
         run_type=IngestionRunType.INCREMENTAL,
     )
     return data_source, ingestion_run
 
 
-def test_faostat_bulk_download_client_fetches_filtered_rows():
+def test_faostat_api_client_fetches_filtered_rows():
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["url"] = str(request.url)
-        return httpx.Response(200, content=_build_faostat_zip())
+        captured["url"] = str(request.url.copy_with(query=None))
+        captured["params"] = dict(request.url.params)
+        return httpx.Response(200, json=_build_faostat_api_response())
 
-    client = FAOSTATBulkDownloadClient(transport=httpx.MockTransport(handler))
+    client = FAOSTATAPIClient(transport=httpx.MockTransport(handler))
     rows = list(
         client.iter_crop_statistics(
             start_year=2023,
@@ -161,7 +116,9 @@ def test_faostat_bulk_download_client_fetches_filtered_rows():
     assert len(rows) == 3
     assert rows[0]["Area"] == "United States of America"
     assert rows[0]["Item"] == "Maize"
-    assert captured["url"] == settings.FAOSTAT_BULK_DOWNLOAD_URL
+    assert captured["url"] == settings.FAOSTAT_API_BASE_URL
+    assert captured["params"]["year"] == "2023"
+    assert captured["params"]["output_type"] == "objects"
 
 
 def test_faostat_transformer_maps_statistics_rows():
@@ -192,7 +149,7 @@ def test_faostat_transformer_maps_statistics_rows():
 def test_external_crop_statistics_writer_skips_existing_and_in_batch_duplicates(db):
     db.add(
         ExternalCropStatistic(
-            source_name="FAOSTAT",
+            source_name="Legacy Feed",
             country="United States of America",
             year=2023,
             crop_name="Maize",
@@ -240,7 +197,7 @@ def test_external_crop_statistics_writer_skips_existing_and_in_batch_duplicates(
                 record_type="external_crop_statistics",
                 source_identifier="us-maize-2023-yield-dup",
                 values={
-                    "source_name": "FAOSTAT",
+                    "source_name": "Mirror Feed",
                     "country": "United States of America",
                     "year": 2023,
                     "crop_name": "Maize",
@@ -264,7 +221,7 @@ def test_external_crop_statistics_writer_skips_existing_and_in_batch_duplicates(
 
 
 def test_execute_faostat_ingestion_persists_run_payloads_and_statistics(db):
-    bulk_client = _StaticFAOSTATClient(_build_faostat_rows())
+    api_client = _StaticFAOSTATClient(_build_faostat_rows())
 
     first_result = execute_faostat_ingestion(
         db,
@@ -274,8 +231,10 @@ def test_execute_faostat_ingestion_persists_run_payloads_and_statistics(db):
         crops=["Maize"],
         batch_size=2,
         run_type=IngestionRunType.BACKFILL,
-        bulk_client=bulk_client,
+        api_client=api_client,
     )
+
+    data_source = db.query(DataSource).one()
 
     assert first_result.status == IngestionRunStatus.SUCCEEDED
     assert first_result.records_fetched == 2
@@ -287,7 +246,8 @@ def test_execute_faostat_ingestion_persists_run_payloads_and_statistics(db):
     assert db.query(IngestionRun).count() == 1
     assert db.query(RawIngestionPayload).count() == 2
     assert db.query(ExternalCropStatistic).count() == 3
-    assert bulk_client.calls[0]["base_url"] == settings.FAOSTAT_BULK_DOWNLOAD_URL
+    assert data_source.source_type == DataSourceType.API
+    assert api_client.calls[0]["base_url"] == settings.FAOSTAT_API_BASE_URL
 
     second_result = execute_faostat_ingestion(
         db,
@@ -297,7 +257,7 @@ def test_execute_faostat_ingestion_persists_run_payloads_and_statistics(db):
         crops=["Maize"],
         batch_size=2,
         run_type=IngestionRunType.BACKFILL,
-        bulk_client=bulk_client,
+        api_client=api_client,
     )
 
     assert second_result.status == IngestionRunStatus.SUCCEEDED

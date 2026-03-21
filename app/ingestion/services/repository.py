@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -32,7 +33,7 @@ class IngestionRepository:
                 f"Ingestion tables are missing ({required}). Run 'alembic upgrade head' before starting ingestion."
             )
 
-    def get_required_data_source(self, data_source_id: int) -> DataSource:
+    def get_required_data_source(self, data_source_id: UUID) -> DataSource:
         """Return a data source by id or raise a service-level not-found error."""
 
         data_source = self.db.get(DataSource, data_source_id)

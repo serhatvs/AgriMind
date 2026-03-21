@@ -52,7 +52,7 @@ ingestion_payload_type_enum = sa.Enum(
 def upgrade() -> None:
     op.create_table(
         "data_sources",
-        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("source_name", sa.String(length=255), nullable=False),
         sa.Column("source_type", data_source_type_enum, nullable=False),
         sa.Column("base_url", sa.String(length=1024), nullable=True),
@@ -68,7 +68,7 @@ def upgrade() -> None:
     op.create_table(
         "ingestion_runs",
         sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("data_source_id", sa.Integer(), nullable=False),
+        sa.Column("data_source_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("run_type", ingestion_run_type_enum, nullable=False),
         sa.Column("status", ingestion_run_status_enum, nullable=False),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),

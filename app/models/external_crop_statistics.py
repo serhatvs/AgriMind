@@ -16,12 +16,11 @@ class ExternalCropStatistic(CreatedAtMixin, Base):
     __tablename__ = "external_crop_statistics"
     __table_args__ = (
         UniqueConstraint(
-            "source_name",
             "country",
             "year",
             "crop_name",
             "statistic_type",
-            name="uq_external_crop_statistics_source_country_year_crop_stat",
+            name="uq_external_crop_statistics_country_year_crop_stat",
         ),
         CheckConstraint("year >= 1900", name="ck_external_crop_statistics_year_floor"),
         CheckConstraint("statistic_value >= 0", name="ck_external_crop_statistics_value_non_negative"),
@@ -38,6 +37,7 @@ class ExternalCropStatistic(CreatedAtMixin, Base):
             name="external_crop_statistic_type_enum",
             native_enum=False,
             validate_strings=True,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
         ),
         nullable=False,
         index=True,

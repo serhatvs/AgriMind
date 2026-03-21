@@ -11,7 +11,14 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import SessionLocal
 from app.db.reflection import tables_exist
-from app.ingestion.clients import FAOSTATBulkDownloadClient, FAOSTATIngestionClient
+from app.ingestion.clients import FAOSTATAPIClient, FAOSTATIngestionClient
+from app.ingestion.runners.runtime import (
+    RunnerExitCode,
+    configure_runner_logging,
+    exit_code_for_exception,
+    exit_code_for_run_status,
+    log_event,
+)
 from app.ingestion.runners.source_registry import IngestionSourceDefinition
 from app.ingestion.services import (
     ExternalCropStatisticsWriter,
@@ -80,7 +87,7 @@ def execute_faostat_ingestion(
     batch_size: int | None = None,
     run_type: IngestionRunType = IngestionRunType.INCREMENTAL,
     repository: IngestionRepository | None = None,
-    bulk_client: FAOSTATBulkDownloadClient | None = None,
+    api_client: FAOSTATAPIClient | None = None,
     data_source: DataSource | None = None,
 ) -> IngestionExecutionResult:
     """Run the FAOSTAT ingestion flow for annual crop statistics."""
@@ -94,13 +101,13 @@ def execute_faostat_ingestion(
 
     data_source = data_source or repository.ensure_registered_data_source(
         source_name=settings.FAOSTAT_SOURCE_NAME,
-        source_type=DataSourceType.FILE,
-        base_url=settings.FAOSTAT_BULK_DOWNLOAD_URL,
+        source_type=DataSourceType.API,
+        base_url=settings.FAOSTAT_API_BASE_URL,
         default_is_active=True,
     )
 
     ingestion_client = FAOSTATIngestionClient(
-        bulk_client=bulk_client or FAOSTATBulkDownloadClient(base_url=data_source.base_url),
+        api_client=api_client or FAOSTATAPIClient(base_url=data_source.base_url),
         start_year=start_year,
         end_year=end_year,
         countries=countries,
@@ -162,9 +169,11 @@ def build_faostat_source_definition() -> IngestionSourceDefinition:
 
     return IngestionSourceDefinition(
         source_name=settings.FAOSTAT_SOURCE_NAME,
-        source_type=DataSourceType.FILE,
-        base_url=settings.FAOSTAT_BULK_DOWNLOAD_URL,
+        source_type=DataSourceType.API,
+        base_url=settings.FAOSTAT_API_BASE_URL,
         executor=execute_registered_faostat_ingestion,
+        default_is_active=settings.is_ingestion_source_enabled(settings.FAOSTAT_SOURCE_NAME),
+        is_enabled=settings.is_ingestion_source_enabled(settings.FAOSTAT_SOURCE_NAME),
     )
 
 
@@ -189,17 +198,39 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_argument_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
-    logging.basicConfig(
-        level=getattr(logging, args.log_level, logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    configure_runner_logging(args.log_level)
 
     countries = parse_filter_values(args.country, settings.FAOSTAT_DEFAULT_COUNTRIES)
     crops = parse_filter_values(args.crop, settings.FAOSTAT_DEFAULT_CROPS)
+    source_definition = build_faostat_source_definition()
+
+    if not source_definition.is_enabled:
+        log_event(
+            logger,
+            logging.INFO,
+            "ingestion_runner_skipped",
+            runner="faostat",
+            source_name=source_definition.source_name,
+            reason="disabled_by_config",
+        )
+        return int(RunnerExitCode.SUCCESS)
 
     db = SessionLocal()
     try:
-        execute_faostat_ingestion(
+        log_event(
+            logger,
+            logging.INFO,
+            "ingestion_runner_started",
+            runner="faostat",
+            source_name=source_definition.source_name,
+            run_type=args.run_type,
+            start_year=args.start_year,
+            end_year=args.end_year,
+            countries=countries,
+            crops=crops,
+            batch_size=args.batch_size,
+        )
+        result = execute_faostat_ingestion(
             db,
             start_year=args.start_year,
             end_year=args.end_year,
@@ -208,12 +239,32 @@ def main(argv: Sequence[str] | None = None) -> int:
             batch_size=args.batch_size,
             run_type=IngestionRunType(args.run_type),
         )
-    except Exception:
+        log_event(
+            logger,
+            logging.INFO,
+            "ingestion_runner_completed",
+            runner="faostat",
+            source_name=source_definition.source_name,
+            status=result.status,
+            records_fetched=result.records_fetched,
+            records_inserted=result.records_inserted,
+            records_skipped=result.records_skipped,
+            ingestion_run_id=result.ingestion_run_id,
+        )
+        return int(exit_code_for_run_status(result.status))
+    except Exception as exc:
+        log_event(
+            logger,
+            logging.ERROR,
+            "ingestion_runner_failed",
+            runner="faostat",
+            source_name=source_definition.source_name,
+            error_message=str(exc),
+        )
         logger.exception("FAOSTAT ingestion failed")
-        return 1
+        return int(exit_code_for_exception(exc))
     finally:
         db.close()
-    return 0
 
 
 if __name__ == "__main__":

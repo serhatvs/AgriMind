@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class ExternalCropStatisticsWriter(NormalizedRecordWriter):
-    """Persist external crop statistics while skipping duplicate source/country/year/crop/stat rows."""
+    """Persist external crop statistics while skipping duplicate country/year/crop/stat rows."""
 
     def write(
         self,
@@ -60,13 +60,11 @@ class ExternalCropStatisticsWriter(NormalizedRecordWriter):
 
         existing_rows = db.execute(
             select(
-                statistics_table.c.source_name,
                 statistics_table.c.country,
                 statistics_table.c.year,
                 statistics_table.c.crop_name,
                 statistics_table.c.statistic_type,
             )
-            .where(statistics_table.c.source_name.in_({row.values["source_name"] for row in prepared_rows}))
             .where(statistics_table.c.country.in_({row.values["country"] for row in prepared_rows}))
             .where(statistics_table.c.year.in_({row.values["year"] for row in prepared_rows}))
             .where(statistics_table.c.crop_name.in_({row.values["crop_name"] for row in prepared_rows}))

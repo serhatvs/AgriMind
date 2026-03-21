@@ -37,6 +37,7 @@ class IngestionSourceDefinition:
     executor: SourceIngestionExecutor
     aliases: tuple[str, ...] = ()
     default_is_active: bool = True
+    is_enabled: bool = True
 
     def matches(self, source_name: str) -> bool:
         """Return whether the provided source name matches this definition."""
@@ -94,10 +95,26 @@ class IngestionSourceRunnerRegistry:
 
         return tuple(self._definitions)
 
-    def ensure_registered_sources(self, repository: IngestionRepository) -> list[DataSource]:
+    def is_enabled(self, source_name: str, *, default: bool = False) -> bool:
+        """Return whether a source is enabled by the registry definition."""
+
+        definition = self._name_map.get(normalize_source_name(source_name))
+        if definition is None:
+            return default
+        return definition.is_enabled
+
+    def ensure_registered_sources(
+        self,
+        repository: IngestionRepository,
+        *,
+        enabled_only: bool = True,
+    ) -> list[DataSource]:
         """Ensure every registered source has a backing data_sources row."""
 
-        return [definition.ensure_data_source(repository) for definition in self._definitions]
+        definitions = self._definitions
+        if enabled_only:
+            definitions = [definition for definition in definitions if definition.is_enabled]
+        return [definition.ensure_data_source(repository) for definition in definitions]
 
 
 def normalize_source_name(source_name: str) -> str:

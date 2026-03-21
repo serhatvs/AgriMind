@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,7 +27,7 @@ class DataSourceRead(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     source_name: str
     source_type: DataSourceType
     base_url: str | None
@@ -41,7 +42,7 @@ class IngestionRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    data_source_id: int
+    data_source_id: UUID
     run_type: IngestionRunType
     status: IngestionRunStatus
     started_at: datetime

@@ -1,13 +1,11 @@
-"""Client for FAOSTAT bulk crop statistics downloads and ingestion batching."""
+"""REST client for FAOSTAT crop statistics and ingestion batching helpers."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-import csv
-import io
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 import logging
-from zipfile import ZipFile
+from typing import Any
 
 import httpx
 
@@ -15,27 +13,38 @@ from app.config import settings
 from app.ingestion.clients.base import IngestionClient
 from app.ingestion.errors import IngestionConfigurationError
 from app.ingestion.types import RawPayloadEnvelope
-from app.models.enums import IngestionPayloadType, IngestionRunType
+from app.models.enums import ExternalCropStatisticType, IngestionPayloadType, IngestionRunType
 from app.models.ingestion import DataSource
 
 
 logger = logging.getLogger(__name__)
 
 
-class FAOSTATBulkDownloadClient:
-    """Download and filter the official FAOSTAT bulk crops and livestock export."""
+class FAOSTATAPIClient:
+    """Fetch annual crop statistics from the FAOSTAT REST API."""
 
-    DEFAULT_DATASET_FILENAME = "Production_Crops_Livestock_E_All_Data_(Normalized).csv"
-    SUPPORTED_ELEMENTS = ("Production", "Yield", "Area harvested")
+    DEFAULT_DATASET_NAME = "FAOSTAT REST API"
+    SUPPORTED_ELEMENTS = (
+        "Production",
+        "Yield",
+        "Area harvested",
+    )
+    ELEMENT_ALIASES = {
+        ExternalCropStatisticType.PRODUCTION.value: {"production", "production quantity", "2510", "5510"},
+        ExternalCropStatisticType.YIELD.value: {"yield", "5412", "5419"},
+        ExternalCropStatisticType.HARVESTED_AREA.value: {"area harvested", "harvested area", "5312"},
+    }
 
     def __init__(
         self,
         *,
         base_url: str | None = None,
+        api_token: str | None = None,
         timeout_seconds: float | None = None,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        self.base_url = base_url or settings.FAOSTAT_BULK_DOWNLOAD_URL
+        self.base_url = base_url or settings.FAOSTAT_API_BASE_URL
+        self.api_token = api_token or settings.FAOSTAT_API_TOKEN
         self.timeout_seconds = timeout_seconds or settings.FAOSTAT_TIMEOUT_SECONDS
         self.transport = transport
 
@@ -46,76 +55,116 @@ class FAOSTATBulkDownloadClient:
         end_year: int,
         countries: Sequence[str] | None = None,
         crops: Sequence[str] | None = None,
-        elements: Sequence[str] | None = None,
         base_url: str | None = None,
-    ) -> Iterable[dict[str, str]]:
-        """Yield filtered FAOSTAT rows from the bulk crops and livestock archive."""
+    ) -> Iterable[dict[str, Any]]:
+        """Yield FAOSTAT crop statistic rows from the REST API."""
 
         if start_year > end_year:
             raise IngestionConfigurationError("start_year must be less than or equal to end_year")
 
         allowed_countries = self._normalize_filter_values(countries)
         allowed_crops = self._normalize_filter_values(crops)
-        allowed_elements = self._normalize_filter_values(elements or self.SUPPORTED_ELEMENTS)
 
-        archive_bytes = self._download_archive(base_url=base_url)
-        with ZipFile(io.BytesIO(archive_bytes)) as archive:
-            csv_member_name = self._select_csv_member_name(archive)
-            with archive.open(csv_member_name) as csv_file:
-                reader = csv.DictReader(io.TextIOWrapper(csv_file, encoding="utf-8-sig", newline=""))
-                for raw_row in reader:
-                    row = {
-                        (key or "").strip(): (value.strip() if isinstance(value, str) else "")
-                        for key, value in raw_row.items()
-                    }
-                    if not self._matches_filters(
-                        row,
-                        start_year=start_year,
-                        end_year=end_year,
-                        countries=allowed_countries,
-                        crops=allowed_crops,
-                        elements=allowed_elements,
-                    ):
-                        continue
-                    yield row
+        for year in range(start_year, end_year + 1):
+            logger.info("Fetching FAOSTAT crop statistics for year %s", year)
+            for row in self._fetch_year_rows(year=year, base_url=base_url):
+                if not self._matches_filters(
+                    row,
+                    year=year,
+                    countries=allowed_countries,
+                    crops=allowed_crops,
+                ):
+                    continue
+                yield dict(row)
 
-    def _download_archive(self, *, base_url: str | None = None) -> bytes:
+    def _fetch_year_rows(
+        self,
+        *,
+        year: int,
+        base_url: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params = {
+            "year": year,
+            "show_unit": 1,
+            "show_flags": 0,
+            "null_values": 0,
+            "limit": -1,
+            "output_type": "objects",
+        }
         request_url = base_url or self.base_url
         with httpx.Client(timeout=self.timeout_seconds, transport=self.transport, follow_redirects=True) as client:
-            response = client.get(request_url)
+            response = client.get(request_url, params=params, headers=self._build_headers())
             response.raise_for_status()
-            return response.content
+            payload = response.json()
+        return self._extract_rows(payload, year=year)
 
-    def _select_csv_member_name(self, archive: ZipFile) -> str:
-        try:
-            return next(name for name in archive.namelist() if name.lower().endswith(".csv"))
-        except StopIteration as exc:
-            raise IngestionConfigurationError("FAOSTAT archive does not contain a CSV member") from exc
+    def _extract_rows(self, payload: Any, *, year: int) -> list[dict[str, Any]]:
+        rows = payload.get("data") if isinstance(payload, Mapping) else payload
+        if not isinstance(rows, list):
+            raise IngestionConfigurationError("FAOSTAT API response is missing a list 'data' payload")
+
+        normalized_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                logger.warning("Skipping non-object FAOSTAT row for year %s", year)
+                continue
+            normalized_rows.append({str(key).strip(): value for key, value in row.items()})
+        return normalized_rows
 
     def _matches_filters(
         self,
-        row: dict[str, str],
+        row: Mapping[str, Any],
         *,
-        start_year: int,
-        end_year: int,
+        year: int,
         countries: set[str],
         crops: set[str],
-        elements: set[str],
     ) -> bool:
-        year_value = self._parse_int(row.get("Year"))
-        if year_value is None or year_value < start_year or year_value > end_year:
+        row_year = self._parse_int(self._first_value(row, "Year", "year"))
+        if row_year is None or row_year != year:
             return False
 
-        area_name = row.get("Area", "")
-        if countries and self._normalize_filter_value(area_name) not in countries:
+        country = self._clean_string(self._first_value(row, "Area", "area", "country"))
+        if countries and self._normalize_filter_value(country or "") not in countries:
             return False
 
-        item_name = row.get("Item", "")
-        if crops and self._normalize_filter_value(item_name) not in crops:
+        crop_name = self._clean_string(self._first_value(row, "Item", "item", "crop_name", "crop"))
+        if crops and self._normalize_filter_value(crop_name or "") not in crops:
             return False
 
-        element_name = row.get("Element", "")
-        return self._normalize_filter_value(element_name) in elements
+        statistic_type = self._normalize_statistic_type(row)
+        return statistic_type is not None
+
+    def _normalize_statistic_type(self, row: Mapping[str, Any]) -> str | None:
+        element_name = self._clean_string(self._first_value(row, "Element", "element"))
+        element_code = self._clean_string(self._first_value(row, "Element Code", "element_code", "elementCode"))
+        normalized_candidates = {
+            self._normalize_filter_value(candidate)
+            for candidate in (element_name, element_code)
+            if candidate
+        }
+        for statistic_type, aliases in self.ELEMENT_ALIASES.items():
+            if normalized_candidates.intersection(alias.casefold() for alias in aliases):
+                return statistic_type
+        return None
+
+    @staticmethod
+    def _first_value(row: Mapping[str, Any], *keys: str) -> Any:
+        for key in keys:
+            if key in row:
+                return row[key]
+        return None
+
+    def _build_headers(self) -> dict[str, str]:
+        if not self.api_token:
+            return {}
+        return {"Authorization": f"Bearer {self.api_token}"}
+
+    @staticmethod
+    def _clean_string(value: Any) -> str | None:
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
 
     @staticmethod
     def _normalize_filter_values(values: Sequence[str] | None) -> set[str]:
@@ -133,21 +182,21 @@ class FAOSTATBulkDownloadClient:
         return value.strip().casefold()
 
     @staticmethod
-    def _parse_int(value: str | None) -> int | None:
-        if value is None or value == "":
+    def _parse_int(value: Any) -> int | None:
+        if value is None:
             return None
         try:
-            return int(value)
+            return int(str(value).strip())
         except ValueError:
             return None
 
 
 class FAOSTATIngestionClient(IngestionClient):
-    """Fetch filtered FAOSTAT rows and package them into raw payload batches."""
+    """Fetch filtered FAOSTAT REST rows and package them into raw payload batches."""
 
     def __init__(
         self,
-        bulk_client: FAOSTATBulkDownloadClient,
+        api_client: FAOSTATAPIClient,
         *,
         start_year: int | None = None,
         end_year: int | None = None,
@@ -156,7 +205,7 @@ class FAOSTATIngestionClient(IngestionClient):
         batch_size: int | None = None,
         default_lookback_years: int | None = None,
     ) -> None:
-        self.bulk_client = bulk_client
+        self.api_client = api_client
         self.start_year = start_year
         self.end_year = end_year
         self.countries = tuple(countries or ())
@@ -192,7 +241,7 @@ class FAOSTATIngestionClient(IngestionClient):
         *,
         run_type: IngestionRunType,
     ) -> Sequence[RawPayloadEnvelope]:
-        """Download, filter, and chunk FAOSTAT rows into raw ingestion payloads."""
+        """Fetch FAOSTAT REST rows and store them as batched raw payload envelopes."""
 
         _ = run_type
         if not data_source.base_url:
@@ -204,10 +253,10 @@ class FAOSTATIngestionClient(IngestionClient):
 
         start_year, end_year = self.resolve_year_range()
         payloads: list[RawPayloadEnvelope] = []
-        batch_rows: list[dict[str, str]] = []
+        batch_rows: list[dict[str, Any]] = []
         batch_number = 0
 
-        for row in self.bulk_client.iter_crop_statistics(
+        for row in self.api_client.iter_crop_statistics(
             start_year=start_year,
             end_year=end_year,
             countries=self.countries,
@@ -239,11 +288,7 @@ class FAOSTATIngestionClient(IngestionClient):
             )
 
         if not payloads:
-            logger.warning(
-                "No FAOSTAT rows matched the filters for %s-%s",
-                start_year,
-                end_year,
-            )
+            logger.warning("No FAOSTAT rows matched the filters for %s-%s", start_year, end_year)
         return payloads
 
     def _build_payload(
@@ -252,16 +297,16 @@ class FAOSTATIngestionClient(IngestionClient):
         batch_number: int,
         start_year: int,
         end_year: int,
-        rows: list[dict[str, str]],
+        rows: list[dict[str, Any]],
     ) -> RawPayloadEnvelope:
         return RawPayloadEnvelope(
             payload_type=IngestionPayloadType.BATCH,
             source_identifier=f"faostat:{start_year}:{end_year}:batch-{batch_number}",
             raw_json={
                 "dataset_name": getattr(
-                    self.bulk_client,
-                    "DEFAULT_DATASET_FILENAME",
-                    FAOSTATBulkDownloadClient.DEFAULT_DATASET_FILENAME,
+                    self.api_client,
+                    "DEFAULT_DATASET_NAME",
+                    FAOSTATAPIClient.DEFAULT_DATASET_NAME,
                 ),
                 "start_year": start_year,
                 "end_year": end_year,
@@ -272,3 +317,7 @@ class FAOSTATIngestionClient(IngestionClient):
                 "rows": rows,
             },
         )
+
+
+# Backward-compatible alias for older imports that still reference the bulk client name.
+FAOSTATBulkDownloadClient = FAOSTATAPIClient

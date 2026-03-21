@@ -44,12 +44,14 @@ class FAOSTATStatisticsTransformer(PayloadTransformer):
         records: list[NormalizedRecord] = []
         for row in rows:
             row_mapping = self._require_mapping(row, "payload.raw_json.rows[]")
-            country = self._clean_string(row_mapping.get("Area"))
-            crop_name = self._clean_string(row_mapping.get("Item"))
-            statistic_type = self.ELEMENT_TO_STATISTIC_TYPE.get(self._clean_string(row_mapping.get("Element")))
-            year = self._parse_int(row_mapping.get("Year"))
-            statistic_value = self._parse_float(row_mapping.get("Value"))
-            unit = self._clean_string(row_mapping.get("Unit"))
+            country = self._clean_string(self._first_value(row_mapping, "Area", "area", "country"))
+            crop_name = self._clean_string(self._first_value(row_mapping, "Item", "item", "crop_name", "crop"))
+            statistic_type = self.ELEMENT_TO_STATISTIC_TYPE.get(
+                self._clean_string(self._first_value(row_mapping, "Element", "element"))
+            )
+            year = self._parse_int(self._first_value(row_mapping, "Year", "year"))
+            statistic_value = self._parse_float(self._first_value(row_mapping, "Value", "value"))
+            unit = self._clean_string(self._first_value(row_mapping, "Unit", "unit"))
 
             source_identifier = ":".join(
                 part
@@ -96,6 +98,13 @@ class FAOSTATStatisticsTransformer(PayloadTransformer):
             return None
         cleaned = str(value).strip()
         return cleaned or None
+
+    @staticmethod
+    def _first_value(row: Mapping[str, Any], *keys: str) -> Any:
+        for key in keys:
+            if key in row:
+                return row[key]
+        return None
 
     @staticmethod
     def _parse_int(value: Any) -> int | None:

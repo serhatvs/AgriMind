@@ -15,6 +15,9 @@ def clear_provider_env(monkeypatch):
         "AI_EXPLANATION_PROVIDER",
         "AI_RISK_PROVIDER",
         "AI_EXTRACTION_PROVIDER",
+        "INGESTION_LOG_FORMAT",
+        "INGESTION_ENABLED_SOURCES",
+        "INGESTION_DISABLED_SOURCES",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -95,9 +98,31 @@ def test_faostat_defaults_are_present():
     config = Settings(_env_file=None)
 
     assert config.FAOSTAT_SOURCE_NAME == "FAOSTAT Crops and Livestock"
+    assert config.FAOSTAT_API_BASE_URL.endswith("/api/v1/en/data/QCL")
     assert "Production_Crops_Livestock" in config.FAOSTAT_BULK_DOWNLOAD_URL
     assert config.FAOSTAT_DEFAULT_LOOKBACK_YEARS == 1
     assert config.FAOSTAT_BATCH_SIZE == 500
+
+
+def test_ingestion_source_filters_support_allow_and_deny_lists():
+    allowlisted_config = Settings(
+        _env_file=None,
+        INGESTION_ENABLED_SOURCES="NASA POWER Daily, FAOSTAT Crops and Livestock",
+    )
+    denylisted_config = Settings(
+        _env_file=None,
+        INGESTION_DISABLED_SOURCES="FAOSTAT Crops and Livestock",
+    )
+
+    assert allowlisted_config.get_ingestion_enabled_sources() == {
+        "nasa power daily",
+        "faostat crops and livestock",
+    }
+    assert allowlisted_config.is_ingestion_source_enabled("NASA POWER Daily") is True
+    assert allowlisted_config.is_ingestion_source_enabled("Unknown Source") is False
+    assert denylisted_config.get_ingestion_disabled_sources() == {"faostat crops and livestock"}
+    assert denylisted_config.is_ingestion_source_enabled("FAOSTAT Crops and Livestock") is False
+    assert denylisted_config.is_ingestion_source_enabled("NASA POWER Daily") is True
 
 
 @pytest.mark.parametrize(
@@ -105,8 +130,25 @@ def test_faostat_defaults_are_present():
     [
         ("FAOSTAT_DEFAULT_LOOKBACK_YEARS", 0, "FAOSTAT_DEFAULT_LOOKBACK_YEARS must be greater than 0"),
         ("FAOSTAT_BATCH_SIZE", 0, "FAOSTAT_BATCH_SIZE must be greater than 0"),
+        (
+            "INGESTION_LOG_FORMAT",
+            "yaml",
+            "INGESTION_LOG_FORMAT must be either 'json' or 'text'",
+        ),
     ],
 )
 def test_invalid_faostat_settings_fail_clearly(setting_name, setting_value, expected_message):
     with pytest.raises(ValidationError, match=expected_message):
         Settings(_env_file=None, **{setting_name: setting_value})
+
+
+def test_overlapping_ingestion_source_filters_fail_clearly():
+    with pytest.raises(
+        ValidationError,
+        match="INGESTION_ENABLED_SOURCES and INGESTION_DISABLED_SOURCES cannot overlap: nasa power daily",
+    ):
+        Settings(
+            _env_file=None,
+            INGESTION_ENABLED_SOURCES="NASA POWER Daily",
+            INGESTION_DISABLED_SOURCES="nasa power daily",
+        )

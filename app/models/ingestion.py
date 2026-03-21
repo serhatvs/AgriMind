@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, TypeAlias
+from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -23,7 +24,7 @@ class DataSource(TimestampMixin, Base):
         UniqueConstraint("source_name", name="uq_data_sources_source_name"),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     source_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     source_type: Mapped[DataSourceType] = mapped_column(
         Enum(
@@ -60,7 +61,12 @@ class IngestionRun(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    data_source_id: Mapped[int] = mapped_column(Integer, ForeignKey("data_sources.id"), nullable=False, index=True)
+    data_source_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("data_sources.id"),
+        nullable=False,
+        index=True,
+    )
     run_type: Mapped[IngestionRunType] = mapped_column(
         Enum(
             IngestionRunType,
