@@ -42,6 +42,22 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4.1-mini"
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_TIMEOUT_SECONDS: float = 20.0
+    NASA_POWER_SOURCE_NAME: str = "NASA POWER Daily"
+    NASA_POWER_BASE_URL: str = "https://power.larc.nasa.gov/api/temporal/daily/point"
+    NASA_POWER_COMMUNITY: str = "AG"
+    NASA_POWER_TIMEOUT_SECONDS: float = 60.0
+    NASA_POWER_DEFAULT_LOOKBACK_DAYS: int = 30
+    NASA_POWER_TIME_STANDARD: str = "UTC"
+    FAOSTAT_SOURCE_NAME: str = "FAOSTAT Crops and Livestock"
+    FAOSTAT_BULK_DOWNLOAD_URL: str = (
+        "https://fenixservices.fao.org/faostat/static/bulkdownloads/"
+        "Production_Crops_Livestock_E_All_Data_(Normalized).zip"
+    )
+    FAOSTAT_TIMEOUT_SECONDS: float = 120.0
+    FAOSTAT_DEFAULT_LOOKBACK_YEARS: int = 1
+    FAOSTAT_BATCH_SIZE: int = 500
+    FAOSTAT_DEFAULT_COUNTRIES: str = ""
+    FAOSTAT_DEFAULT_CROPS: str = ""
 
     _PROVIDER_SETTING_SPECS: ClassVar[dict[str, ProviderSettingSpec]] = {
         "yield": ProviderSettingSpec(
@@ -95,6 +111,33 @@ class Settings(BaseSettings):
                 return True
             if normalized in {"0", "false", "no", "off", "release", "prod", "production", ""}:
                 return False
+        return value
+
+    @field_validator("NASA_POWER_DEFAULT_LOOKBACK_DAYS")
+    @classmethod
+    def validate_nasa_power_lookback_days(cls, value: int) -> int:
+        """Ensure the default NASA POWER date window is positive."""
+
+        if value <= 0:
+            raise ValueError("NASA_POWER_DEFAULT_LOOKBACK_DAYS must be greater than 0")
+        return value
+
+    @field_validator("FAOSTAT_DEFAULT_LOOKBACK_YEARS")
+    @classmethod
+    def validate_faostat_lookback_years(cls, value: int) -> int:
+        """Ensure the default FAOSTAT year window is positive."""
+
+        if value <= 0:
+            raise ValueError("FAOSTAT_DEFAULT_LOOKBACK_YEARS must be greater than 0")
+        return value
+
+    @field_validator("FAOSTAT_BATCH_SIZE")
+    @classmethod
+    def validate_faostat_batch_size(cls, value: int) -> int:
+        """Ensure the FAOSTAT raw payload batch size is positive."""
+
+        if value <= 0:
+            raise ValueError("FAOSTAT_BATCH_SIZE must be greater than 0")
         return value
 
     @model_validator(mode="after")

@@ -6,10 +6,24 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+from app.config import settings
 from app.database import Base
-from app.models import crop_price, crop_profile, feedback, field, field_crop_cycle, input_cost, recommendation, soil_test, weather_history  # noqa
+from app.models import crop_price, crop_profile, external_crop_statistics, feedback, field, field_crop_cycle, ingestion, input_cost, recommendation, soil_test, weather_history  # noqa
 
 config = context.config
+legacy_database_url = "postgresql://postgres:postgres@localhost:5432/agrimind"
+
+
+def _escape_config_value(value: str) -> str:
+    """Escape percent signs before storing values in the Alembic config parser."""
+
+    return value.replace("%", "%%")
+
+
+configured_database_url = config.get_main_option("sqlalchemy.url")
+if configured_database_url in {"", legacy_database_url}:
+    config.set_main_option("sqlalchemy.url", _escape_config_value(settings.DATABASE_URL))
+
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 

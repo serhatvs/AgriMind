@@ -70,3 +70,46 @@ class CropPreferenceLevel(str, Enum):
     LOW = "low"
     MODERATE = "moderate"
     HIGH = "high"
+
+
+class DataSourceType(str, Enum):
+    """Supported upstream source categories for automated ingestion jobs."""
+
+    API = "api"
+    FILE = "file"
+    DATABASE = "database"
+    WEBHOOK = "webhook"
+
+
+class IngestionRunType(str, Enum):
+    """Execution mode for an ingestion run."""
+
+    FULL = "full"
+    INCREMENTAL = "incremental"
+    BACKFILL = "backfill"
+
+
+class IngestionRunStatus(str, Enum):
+    """Lifecycle state of an ingestion run."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+class IngestionPayloadType(str, Enum):
+    """Supported shapes for persisted raw payload envelopes."""
+
+    RECORD = "record"
+    BATCH = "batch"
+    JSON = "json"
+
+
+class ExternalCropStatisticType(str, Enum):
+    """Normalized crop statistic measures loaded from external datasets."""
+
+    PRODUCTION = "production"
+    YIELD = "yield"
+    HARVESTED_AREA = "harvested_area"

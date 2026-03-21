@@ -89,3 +89,24 @@ def test_settings_accept_stub_provider_ids():
 def test_invalid_provider_selection_fails_clearly(setting_name, setting_value, expected_message):
     with pytest.raises(ValidationError, match=expected_message):
         Settings(_env_file=None, **{setting_name: setting_value})
+
+
+def test_faostat_defaults_are_present():
+    config = Settings(_env_file=None)
+
+    assert config.FAOSTAT_SOURCE_NAME == "FAOSTAT Crops and Livestock"
+    assert "Production_Crops_Livestock" in config.FAOSTAT_BULK_DOWNLOAD_URL
+    assert config.FAOSTAT_DEFAULT_LOOKBACK_YEARS == 1
+    assert config.FAOSTAT_BATCH_SIZE == 500
+
+
+@pytest.mark.parametrize(
+    ("setting_name", "setting_value", "expected_message"),
+    [
+        ("FAOSTAT_DEFAULT_LOOKBACK_YEARS", 0, "FAOSTAT_DEFAULT_LOOKBACK_YEARS must be greater than 0"),
+        ("FAOSTAT_BATCH_SIZE", 0, "FAOSTAT_BATCH_SIZE must be greater than 0"),
+    ],
+)
+def test_invalid_faostat_settings_fail_clearly(setting_name, setting_value, expected_message):
+    with pytest.raises(ValidationError, match=expected_message):
+        Settings(_env_file=None, **{setting_name: setting_value})

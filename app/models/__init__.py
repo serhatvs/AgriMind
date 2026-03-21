@@ -3,9 +3,11 @@
 from app.models import (
     crop_price,
     crop_profile,
+    external_crop_statistics,
     feedback,
     field,
     field_crop_cycle,
+    ingestion,
     input_cost,
     recommendation,
     soil_test,
@@ -15,9 +17,11 @@ from app.models import (
 __all__ = [
     "crop_price",
     "crop_profile",
+    "external_crop_statistics",
     "feedback",
     "field",
     "field_crop_cycle",
+    "ingestion",
     "input_cost",
     "recommendation",
     "soil_test",
