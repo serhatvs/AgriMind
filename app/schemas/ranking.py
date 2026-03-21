@@ -5,7 +5,9 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, PositiveInt
 
 from app.engines.scoring_types import ScoreStatus
+from app.schemas.ai_metadata import AITraceMetadataRead
 from app.schemas.explanation import FieldExplanation
+from app.schemas.yield_prediction import YieldPredictionRange
 
 
 class RankFieldsRequest(BaseModel):
@@ -52,25 +54,53 @@ class ScoreBlockerRead(BaseModel):
     message: str
 
 
+class RankedFieldProviderMetadata(BaseModel):
+    """Provider metadata attached to each ranked field result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agronomic_provider: AITraceMetadataRead
+    ranking_provider: AITraceMetadataRead
+    explanation_provider: AITraceMetadataRead
+    yield_provider: AITraceMetadataRead | None = None
+    risk_provider: AITraceMetadataRead | None = None
+
+
 class RankedFieldRecommendation(BaseModel):
     """Single ranked recommendation entry for a field."""
+
+    model_config = ConfigDict(extra="forbid")
 
     rank: int
     field_id: int
     field_name: str
     total_score: float
+    agronomic_score: float
+    climate_score: float | None
     economic_score: float
+    risk_score: float | None
+    confidence_score: float | None
     estimated_profit: float | None
+    predicted_yield: float | None
+    predicted_yield_range: YieldPredictionRange | None
     ranking_score: float
+    strengths: list[str]
+    weaknesses: list[str]
+    risks: list[str]
     breakdown: dict[str, ScoreComponentRead]
     blockers: list[ScoreBlockerRead]
     reasons: list[str]
+    metadata: AITraceMetadataRead
+    provider_metadata: RankedFieldProviderMetadata
     explanation: FieldExplanation
 
 
 class RankFieldsResponse(BaseModel):
     """Response payload returned by the field ranking endpoint."""
 
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str = "ranking.v2"
     crop: CropSummary
     total_fields_evaluated: int
     ranked_results: list[RankedFieldRecommendation]

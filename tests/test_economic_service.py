@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+
+from app.schemas.ai_metadata import AITraceMetadataRead
 from app.models.crop_price import CropPrice
 from app.models.crop_profile import CropProfile
 from app.models.enums import (
@@ -63,6 +66,13 @@ def _yield_prediction(field_id: int, crop_id: int, yield_per_hectare: float) -> 
         model_version="yield-xgb-v1",
         training_source="test",
         feature_snapshot={},
+        metadata=AITraceMetadataRead(
+            provider_name="test",
+            provider_version="yield-xgb-v1",
+            generated_at=datetime.now(timezone.utc),
+            confidence=0.82,
+            debug_info=None,
+        ),
     )
 
 

@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.ai_metadata import AITraceMetadataRead
+
 
 class YieldPredictionRange(BaseModel):
     """Confidence range around the predicted yield per hectare."""
@@ -27,3 +29,4 @@ class YieldPredictionResult(BaseModel):
     model_version: str
     training_source: str
     feature_snapshot: dict[str, Any]
+    metadata: AITraceMetadataRead

@@ -2,6 +2,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from app.ai.contracts.explanation import ExplanationOutput
+from app.ai.contracts.metadata import AITraceMetadata
+from app.ai.registry import AIProviderRegistry
+from app.config import settings
 from app.models.crop_price import CropPrice
 from app.models.crop_profile import CropProfile
 from app.models.enums import (
@@ -111,9 +115,16 @@ def test_get_ranked_fields_response_ranks_all_fields_when_no_filter(db):
     assert response.total_fields_evaluated == 2
     assert response.crop.crop_name == "Corn"
     assert len(response.ranked_results) == 2
+    assert response.schema_version == "ranking.v2"
     assert response.ranked_results[0].field_name == "Field Alpha"
+    assert response.ranked_results[0].agronomic_score == response.ranked_results[0].total_score
     assert response.ranked_results[0].estimated_profit is not None
+    assert response.ranked_results[0].predicted_yield is not None
+    assert response.ranked_results[0].predicted_yield_range is not None
+    assert response.ranked_results[0].confidence_score is not None
     assert response.ranked_results[0].ranking_score >= response.ranked_results[0].total_score * 0.7
+    assert response.ranked_results[0].metadata.provider_name == "rule_based"
+    assert response.ranked_results[0].provider_metadata.explanation_provider.provider_name == "rule_based"
     assert response.ranked_results[0].explanation.short_explanation
 
 
@@ -209,3 +220,65 @@ def test_get_ranked_fields_response_uses_profitability_in_ranking_score(db):
 
     assert response.ranked_results[0].field_name == "Profit Beta"
     assert response.ranked_results[0].economic_score >= response.ranked_results[1].economic_score
+
+
+def test_get_ranked_fields_response_uses_registry_explanation_provider(db, monkeypatch):
+    class _RegistryExplanationProvider:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def explain(self, request):
+            self.requests.append(request)
+            return ExplanationOutput(
+                short_explanation="Registry explanation summary",
+                detailed_explanation="Registry explanation detail.",
+                strengths=["Strong registry-provided signal."],
+                weaknesses=["No additional weakness recorded."],
+                risks=["Registry-provided risk note."],
+                confidence_note="Deterministic test confidence note.",
+                metadata=AITraceMetadata(
+                    provider_name="registry-test",
+                    provider_version="v1",
+                    generated_at=datetime.now(timezone.utc),
+                    confidence=0.81,
+                    debug_info={"source": "test"},
+                ),
+            )
+
+    class _RecordingRegistry:
+        def __init__(self, provider: _RegistryExplanationProvider) -> None:
+            self._delegate = AIProviderRegistry(settings)
+            self.provider = provider
+            self.calls = 0
+            self.settings = self._delegate.settings
+
+        def get_explanation_provider(self):
+            self.calls += 1
+            return self.provider
+
+        def get_suitability_provider(self):
+            return self._delegate.get_suitability_provider()
+
+        def get_ranking_augmentation_provider(self):
+            return self._delegate.get_ranking_augmentation_provider()
+
+    crop = make_crop()
+    field_obj = make_field("Registry Field")
+    db.add_all([crop, field_obj])
+    db.commit()
+    db.add(make_soil(field_obj.id))
+    db.commit()
+
+    provider = _RegistryExplanationProvider()
+    registry = _RecordingRegistry(provider)
+    monkeypatch.setattr("app.services.ranking_service.get_ai_provider_registry", lambda: registry)
+
+    response = get_ranked_fields_response(db, crop_id=crop.id, field_ids=[field_obj.id])
+
+    assert registry.calls == 1
+    assert provider.requests
+    assert response.ranked_results[0].explanation.short_explanation == "Registry explanation summary"
+    assert response.ranked_results[0].explanation.risks == ["Registry-provided risk note."]
+    assert response.ranked_results[0].strengths == ["Strong registry-provided signal."]
+    assert response.ranked_results[0].metadata.provider_name == settings.AI_RANKING_AUGMENTATION_PROVIDER
+    assert response.ranked_results[0].provider_metadata.explanation_provider.provider_name == "registry-test"

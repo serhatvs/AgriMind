@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
+from app.ai.contracts.yield_prediction import YieldPredictionContext, YieldPredictionServiceClient
 from app.models.crop_price import CropPrice
 from app.models.input_cost import InputCost
 from app.schemas.yield_prediction import YieldPredictionResult
@@ -39,7 +40,7 @@ class EconomicService:
         self,
         db: Session,
         *,
-        yield_prediction_service: YieldPredictionService | None = None,
+        yield_prediction_service: YieldPredictionServiceClient | None = None,
     ) -> None:
         self.db = db
         self.yield_prediction_service = yield_prediction_service or YieldPredictionService(db)
@@ -87,11 +88,13 @@ class EconomicService:
                 reasons=["Economic data unavailable for this crop."],
             )
 
-        prediction = yield_prediction or self.yield_prediction_service.predict_for_entities(
-            field_obj,
-            crop,
-            soil_test=soil_test,
-            climate_summary=climate_summary,
+        prediction = yield_prediction or self.yield_prediction_service.predict_from_context(
+            YieldPredictionContext(
+                field_obj=field_obj,
+                crop=crop,
+                soil_test=soil_test,
+                climate_summary=climate_summary,
+            )
         )
         estimated_revenue = self.estimate_revenue(
             prediction.predicted_yield_per_hectare,

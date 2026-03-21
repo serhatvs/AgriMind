@@ -9,28 +9,34 @@ samples = generate_mock_training_samples(sample_count=300)
 pipeline = YieldPredictionPipeline().fit(samples)
 
 bundle = samples[0].features
-prediction = pipeline.predict(bundle, field_id=101, crop_id=7)
+prediction = pipeline.predict(bundle)
 
-print(prediction.predicted_yield_per_hectare)
-print(prediction.predicted_yield_range.min, prediction.predicted_yield_range.max)
-print(prediction.confidence_score)
+print(prediction.predicted_yield)
+print(prediction.yield_range_min, prediction.yield_range_max)
+print(prediction.confidence)
 ```
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 import json
 import math
 import random
 from pathlib import Path
 from typing import Any
 
+from app.ai.contracts.metadata import AITraceMetadata
+from app.ai.contracts.yield_prediction import (
+    YieldPredictionInput,
+    YieldPredictionOutput,
+    build_yield_prediction_input_from_entities,
+)
 from app.models.crop_profile import CropProfile
 from app.models.field import Field
 from app.models.soil_test import SoilTest
 from app.schemas.weather_history import ClimateSummary
-from app.schemas.yield_prediction import YieldPredictionRange, YieldPredictionResult
 
 try:
     from xgboost import Booster, DMatrix, train as xgb_train
@@ -137,7 +143,7 @@ class YieldFeatureBundle:
     area_hectares: float
     elevation_meters: float | None
     field_drainage_quality: str
-    infrastructure_score: int
+    infrastructure_score: int | None
     water_source_type: str | None
     aspect: str | None
     crop_water_requirement: str
@@ -159,6 +165,54 @@ class YieldFeatureBundle:
     has_climate_summary: bool = True
 
     @classmethod
+    def from_prediction_input(
+        cls,
+        input_data: YieldPredictionInput,
+    ) -> "YieldFeatureBundle":
+        """Build a feature bundle from the canonical yield-prediction input."""
+
+        soil = input_data.soil
+        climate = input_data.climate
+        return cls(
+            crop_name=input_data.crop.crop_name,
+            soil_ph=soil.ph if soil is not None else None,
+            soil_ec=soil.ec if soil is not None else None,
+            organic_matter_percent=soil.organic_matter_percent if soil is not None else None,
+            nitrogen_ppm=soil.nitrogen_ppm if soil is not None else None,
+            phosphorus_ppm=soil.phosphorus_ppm if soil is not None else None,
+            potassium_ppm=soil.potassium_ppm if soil is not None else None,
+            soil_depth_cm=soil.depth_cm if soil is not None else None,
+            water_holding_capacity=soil.water_holding_capacity if soil is not None else None,
+            texture_class=soil.texture_class if soil is not None else None,
+            soil_drainage_class=soil.drainage_class if soil is not None else None,
+            slope_percent=input_data.field.slope_percent,
+            irrigation_available=input_data.field.irrigation_available,
+            area_hectares=input_data.field.area_hectares,
+            elevation_meters=input_data.field.elevation_meters,
+            field_drainage_quality=input_data.field.drainage_quality,
+            infrastructure_score=input_data.field.infrastructure_score,
+            water_source_type=input_data.field.water_source_type,
+            aspect=input_data.field.aspect,
+            crop_water_requirement=input_data.crop.water_requirement_level,
+            crop_drainage_requirement=input_data.crop.drainage_requirement,
+            crop_salinity_tolerance=input_data.crop.salinity_tolerance,
+            crop_rooting_depth_cm=input_data.crop.rooting_depth_cm,
+            crop_slope_tolerance=input_data.crop.slope_tolerance,
+            crop_optimal_temp_min_c=input_data.crop.optimal_temp_min_c,
+            crop_optimal_temp_max_c=input_data.crop.optimal_temp_max_c,
+            crop_rainfall_requirement_mm=input_data.crop.rainfall_requirement_mm,
+            crop_frost_tolerance_days=input_data.crop.frost_tolerance_days,
+            crop_heat_tolerance_days=input_data.crop.heat_tolerance_days,
+            crop_organic_matter_preference=input_data.crop.organic_matter_preference,
+            climate_avg_temp=climate.avg_temp if climate is not None else None,
+            climate_total_rainfall=climate.total_rainfall if climate is not None else None,
+            climate_frost_days=climate.frost_days if climate is not None else None,
+            climate_heat_days=climate.heat_days if climate is not None else None,
+            has_soil_test=soil is not None,
+            has_climate_summary=climate is not None,
+        )
+
+    @classmethod
     def from_entities(
         cls,
         field_obj: Field,
@@ -168,45 +222,13 @@ class YieldFeatureBundle:
     ) -> "YieldFeatureBundle":
         """Build a feature bundle from the current domain models."""
 
-        return cls(
-            crop_name=crop.crop_name,
-            soil_ph=soil_test.ph if soil_test is not None else None,
-            soil_ec=soil_test.ec if soil_test is not None else None,
-            organic_matter_percent=soil_test.organic_matter_percent if soil_test is not None else None,
-            nitrogen_ppm=soil_test.nitrogen_ppm if soil_test is not None else None,
-            phosphorus_ppm=soil_test.phosphorus_ppm if soil_test is not None else None,
-            potassium_ppm=soil_test.potassium_ppm if soil_test is not None else None,
-            soil_depth_cm=soil_test.depth_cm if soil_test is not None else None,
-            water_holding_capacity=soil_test.water_holding_capacity if soil_test is not None else None,
-            texture_class=soil_test.texture_class if soil_test is not None else None,
-            soil_drainage_class=soil_test.drainage_class if soil_test is not None else None,
-            slope_percent=field_obj.slope_percent,
-            irrigation_available=field_obj.irrigation_available,
-            area_hectares=field_obj.area_hectares,
-            elevation_meters=field_obj.elevation_meters,
-            field_drainage_quality=field_obj.drainage_quality,
-            infrastructure_score=field_obj.infrastructure_score,
-            water_source_type=field_obj.water_source_type.value if field_obj.water_source_type is not None else None,
-            aspect=field_obj.aspect.value if field_obj.aspect is not None else None,
-            crop_water_requirement=crop.water_requirement_level.value,
-            crop_drainage_requirement=crop.drainage_requirement.value,
-            crop_salinity_tolerance=crop.salinity_tolerance.value if crop.salinity_tolerance is not None else None,
-            crop_rooting_depth_cm=crop.rooting_depth_cm,
-            crop_slope_tolerance=crop.slope_tolerance,
-            crop_optimal_temp_min_c=crop.optimal_temp_min_c,
-            crop_optimal_temp_max_c=crop.optimal_temp_max_c,
-            crop_rainfall_requirement_mm=crop.rainfall_requirement_mm,
-            crop_frost_tolerance_days=crop.frost_tolerance_days,
-            crop_heat_tolerance_days=crop.heat_tolerance_days,
-            crop_organic_matter_preference=(
-                crop.organic_matter_preference.value if crop.organic_matter_preference is not None else None
-            ),
-            climate_avg_temp=climate_summary.avg_temp if climate_summary is not None else None,
-            climate_total_rainfall=climate_summary.total_rainfall if climate_summary is not None else None,
-            climate_frost_days=climate_summary.frost_days if climate_summary is not None else None,
-            climate_heat_days=climate_summary.heat_days if climate_summary is not None else None,
-            has_soil_test=soil_test is not None,
-            has_climate_summary=climate_summary is not None,
+        return cls.from_prediction_input(
+            build_yield_prediction_input_from_entities(
+                field_obj,
+                crop,
+                soil_test=soil_test,
+                climate_summary=climate_summary,
+            )
         )
 
     def feature_snapshot(self) -> dict[str, Any]:
@@ -432,10 +454,7 @@ class YieldPredictionPipeline:
     def predict(
         self,
         features: YieldFeatureBundle,
-        *,
-        field_id: int,
-        crop_id: int,
-    ) -> YieldPredictionResult:
+    ) -> YieldPredictionOutput:
         """Predict a yield point estimate, range, and confidence score."""
 
         self._ensure_fitted()
@@ -448,15 +467,20 @@ class YieldPredictionPipeline:
         confidence = self._estimate_confidence(features)
         range_min, range_max = self._estimate_range(predicted_yield, confidence)
 
-        return YieldPredictionResult(
-            field_id=field_id,
-            crop_id=crop_id,
-            predicted_yield_per_hectare=predicted_yield,
-            predicted_yield_range=YieldPredictionRange(min=range_min, max=range_max),
-            confidence_score=confidence,
-            model_version=MODEL_VERSION,
-            training_source=self.training_source,
-            feature_snapshot=features.feature_snapshot(),
+        return YieldPredictionOutput(
+            predicted_yield=predicted_yield,
+            yield_range_min=range_min,
+            yield_range_max=range_max,
+            metadata=AITraceMetadata(
+                provider_name=self.training_source,
+                provider_version=MODEL_VERSION,
+                generated_at=datetime.now(timezone.utc),
+                confidence=confidence,
+                debug_info={
+                    "missing_feature_ratio": round(features.missing_feature_ratio(), 4),
+                    "metrics": asdict(self.metrics) if self.metrics is not None else None,
+                },
+            ),
         )
 
     def save(self, output_dir: str | Path) -> Path:

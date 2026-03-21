@@ -2,6 +2,12 @@
 
 Base URL: `http://localhost:8000/api/v1`
 
+The HTTP API is stable while AI capabilities are resolved through the provider registry at startup. By default:
+
+- suitability, risks, explanation, ranking augmentation, and extraction use rule-based providers
+- yield prediction uses the XGBoost provider
+- assistant phrasing uses the OpenAI Responses provider when `OPENAI_API_KEY` is configured and falls back to deterministic phrasing otherwise
+
 ## Fields
 
 ### POST /fields/

@@ -18,10 +18,11 @@ def test_yield_pipeline_trains_and_predicts_range():
     samples = generate_mock_training_samples(sample_count=120)
 
     pipeline = YieldPredictionPipeline().fit(samples, random_seed=123)
-    prediction = pipeline.predict(samples[0].features, field_id=11, crop_id=7)
+    prediction = pipeline.predict(samples[0].features)
 
-    assert prediction.predicted_yield_per_hectare > 0
-    assert prediction.predicted_yield_range.min <= prediction.predicted_yield_per_hectare
-    assert prediction.predicted_yield_range.max >= prediction.predicted_yield_per_hectare
-    assert 0 <= prediction.confidence_score <= 1
-    assert prediction.model_version == "yield-xgb-v1"
+    assert prediction.predicted_yield > 0
+    assert prediction.yield_range_min <= prediction.predicted_yield
+    assert prediction.yield_range_max >= prediction.predicted_yield
+    assert 0 <= prediction.confidence <= 1
+    assert prediction.provider_version == "yield-xgb-v1"
+    assert prediction.generated_at.tzinfo is not None

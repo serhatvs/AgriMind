@@ -8,6 +8,7 @@ The current repository contains a FastAPI backend MVP with:
 - a rule-based suitability engine
 - multi-field crop ranking
 - explanation generation for each recommendation
+- provider-based AI seams for swapping deterministic, ML, and LLM components
 - sample seed data and automated tests
 
 ## Product Goal
@@ -32,7 +33,6 @@ Implemented today:
 
 Not implemented yet:
 
-- yield prediction models
 - risk prediction models
 - economic optimization
 - conversation memory or RAG integration
@@ -55,24 +55,25 @@ In addition to weighted scoring, the engine now applies minimum field area as a 
 
 ## Architecture
 
-The backend follows a straightforward layered structure:
+The backend now separates domain workflows from AI provider implementations:
 
 - `app/api`: FastAPI route handlers
 - `app/services`: data access and persistence logic
-- `app/engines`: suitability, ranking, and explanation logic
+- `app/engines`: compatibility facades for existing suitability, ranking, and explanation imports
+- `app/ai`: provider contracts, registries, orchestration, and concrete rule-based / ML / LLM providers
 - `app/models`: SQLAlchemy models
 - `app/schemas`: Pydantic request/response schemas
 - `migrations`: Alembic migration support
 - `tests`: API and engine tests
 
-This maps well to the target platform direction:
+The provider layer keeps the business logic stable while allowing AI capabilities to be swapped:
 
 - data layer: PostgreSQL + SQLAlchemy models
 - knowledge layer: crop profiles and rule logic
-- rule engine: suitability scoring and hard constraints
-- decision engine: ranking and recommendation generation
-- future ML layer: yield, risk, and optimization models
-- future LLM layer: explanation, Q&A, and RAG workflows
+- rule-based providers: suitability, risks, explanation, ranking augmentation, extraction
+- ML providers: yield prediction
+- LLM providers: grounded Q&A and future extraction/generation workflows
+- orchestration layer: ranking, recommendation, yield, and assistant flows
 
 ## Quick Start
 
@@ -90,11 +91,39 @@ Example:
 
 ```env
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agrimind
+YIELD_PROVIDER=xgboost
+RISK_PROVIDER=rule_based
+EXPLANATION_PROVIDER=rule_based
+EXTRACTION_PROVIDER=rule_based
+AI_SUITABILITY_PROVIDER=rule_based
+AI_RANKING_AUGMENTATION_PROVIDER=rule_based
+AI_ASSISTANT_PROVIDER=openai
+YIELD_MODEL_DIR=artifacts/yield_model
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4.1-mini
 ```
 
+For development or integration testing, the deterministic stub providers can be enabled explicitly:
+
+```env
+YIELD_PROVIDER=stub
+RISK_PROVIDER=stub
+EXPLANATION_PROVIDER=deterministic
+EXTRACTION_PROVIDER=stub
+```
+
 The default configuration is defined in [`app/config.py`](/c:/Users/VICTUS/Workspace/AgriMind/app/config.py).
+
+Short provider env vars are preferred for yield, explanation, risk, and extraction. Legacy `AI_*` names remain supported and are normalized through the same validation rules.
+
+Supported values in the current build:
+
+- `YIELD_PROVIDER`: `stub`, `ml`, or `xgboost`
+- `EXPLANATION_PROVIDER`: `deterministic` or `rule_based`
+- `RISK_PROVIDER`: `rule_based` or `stub`
+- `EXTRACTION_PROVIDER`: `manual`, `rule_based`, or `stub`
+
+Provider ids are validated during settings load and again on startup. Invalid or unknown provider ids fail fast before the API begins serving requests.
 
 ### 3. Run the API
 

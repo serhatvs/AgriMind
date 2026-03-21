@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.ai.registry import get_ai_provider_registry
 from app.api import agri_assistant, crop_profiles, crops, dashboards, fields, ranking, recommendations, soil_tests
 from app.config import settings
 from app.database import Base, engine
@@ -20,6 +21,7 @@ from app.models import (  # noqa: F401
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    get_ai_provider_registry().validate_configuration()
     try:
         Base.metadata.create_all(bind=engine)
     except Exception:

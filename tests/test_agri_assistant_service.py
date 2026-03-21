@@ -1,18 +1,22 @@
 import json
+from datetime import datetime, timezone
 
 import httpx
 import pytest
 
+from app.schemas.ai_metadata import AITraceMetadataRead
 from app.engines.scoring_types import ScoreStatus
 from app.schemas.agri_assistant import AgriAssistantContext, AgriAssistantRankingRow
 from app.schemas.explanation import FieldExplanation
 from app.schemas.ranking import (
     CropSummary,
     RankFieldsResponse,
+    RankedFieldProviderMetadata,
     RankedFieldRecommendation,
     ScoreBlockerRead,
     ScoreComponentRead,
 )
+from app.schemas.yield_prediction import YieldPredictionRange
 from app.services.agri_assistant_prompts import (
     build_agri_assistant_system_prompt,
     build_agri_assistant_user_prompt,
@@ -43,6 +47,16 @@ def _make_component(
     )
 
 
+def _trace_metadata(provider_name: str, *, confidence: float | None = None) -> AITraceMetadataRead:
+    return AITraceMetadataRead(
+        provider_name=provider_name,
+        provider_version="v1",
+        generated_at=datetime.now(timezone.utc),
+        confidence=confidence,
+        debug_info=None,
+    )
+
+
 def _make_ranked_result(
     *,
     rank: int,
@@ -64,9 +78,18 @@ def _make_ranked_result(
         field_id=field_id,
         field_name=field_name,
         total_score=total_score,
+        agronomic_score=total_score,
+        climate_score=None,
         economic_score=economic_score,
+        risk_score=None,
+        confidence_score=None,
         estimated_profit=estimated_profit,
+        predicted_yield=None,
+        predicted_yield_range=YieldPredictionRange(min=0.0, max=0.0) if estimated_profit is not None else None,
         ranking_score=ranking_score,
+        strengths=strengths or [],
+        weaknesses=weaknesses or [],
+        risks=risks or [],
         breakdown=breakdown
         or {
             "soil_compatibility": _make_component(
@@ -80,12 +103,21 @@ def _make_ranked_result(
             for index, message in enumerate(blockers or [], start=1)
         ],
         reasons=reasons or [],
+        metadata=_trace_metadata("rule_based", confidence=0.74 if estimated_profit is not None else None),
+        provider_metadata=RankedFieldProviderMetadata(
+            agronomic_provider=_trace_metadata("rule_based"),
+            ranking_provider=_trace_metadata("rule_based", confidence=0.74 if estimated_profit is not None else None),
+            explanation_provider=_trace_metadata("rule_based", confidence=0.78),
+            yield_provider=None,
+            risk_provider=_trace_metadata("rule_based", confidence=0.7),
+        ),
         explanation=FieldExplanation(
             short_explanation=f"{field_name} summary",
             detailed_explanation=f"{field_name} detailed explanation",
             strengths=strengths or [],
             weaknesses=weaknesses or [],
             risks=risks or [],
+            metadata=_trace_metadata("rule_based", confidence=0.78),
         ),
     )
 
@@ -252,6 +284,30 @@ def test_assistant_service_returns_provider_answer_and_preserves_sections():
     assert response.model == "gpt-test"
     assert response.why_this_field == context.why_this_field
     assert response.missing_data == context.missing_data
+
+
+def test_assistant_service_uses_registry_provider_by_default(monkeypatch):
+    class _RecordingRegistry:
+        def __init__(self, provider) -> None:
+            self.provider = provider
+            self.calls = 0
+
+        def get_assistant_provider(self):
+            self.calls += 1
+            return self.provider
+
+    registry = _RecordingRegistry(_StubProvider("Registry answer."))
+    monkeypatch.setattr(
+        "app.ai.orchestration.agri_assistant.get_ai_provider_registry",
+        lambda: registry,
+    )
+
+    service = AgriAssistantService()
+    response = service.ask_agri_assistant("Why this field?", build_agri_assistant_context(_make_ranking_response()))
+
+    assert registry.calls == 1
+    assert response.answer == "Registry answer."
+    assert response.used_fallback is False
 
 
 def test_assistant_service_falls_back_when_provider_errors():

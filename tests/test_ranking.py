@@ -318,6 +318,7 @@ def test_rank_fields_api_returns_wrapped_ranking_response(client, db):
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["schema_version"] == "ranking.v2"
     assert payload["crop"] == {
         "id": crop["id"],
         "crop_name": "Corn",
@@ -330,12 +331,23 @@ def test_rank_fields_api_returns_wrapped_ranking_response(client, db):
         "field_id",
         "field_name",
         "total_score",
+        "agronomic_score",
+        "climate_score",
         "economic_score",
+        "risk_score",
+        "confidence_score",
         "estimated_profit",
+        "predicted_yield",
+        "predicted_yield_range",
         "ranking_score",
+        "strengths",
+        "weaknesses",
+        "risks",
         "breakdown",
         "blockers",
         "reasons",
+        "metadata",
+        "provider_metadata",
         "explanation",
     }
     assert set(payload["ranked_results"][0]["explanation"].keys()) == {
@@ -344,10 +356,22 @@ def test_rank_fields_api_returns_wrapped_ranking_response(client, db):
         "strengths",
         "weaknesses",
         "risks",
+        "metadata",
+    }
+    assert set(payload["ranked_results"][0]["provider_metadata"].keys()) == {
+        "agronomic_provider",
+        "ranking_provider",
+        "explanation_provider",
+        "yield_provider",
+        "risk_provider",
     }
     assert "No irrigation available for a high water-demand crop." in payload["ranked_results"][1]["explanation"]["risks"]
     assert payload["ranked_results"][0]["estimated_profit"] is not None
     assert isinstance(payload["ranked_results"][0]["economic_score"], float)
+    assert payload["ranked_results"][0]["agronomic_score"] == payload["ranked_results"][0]["total_score"]
+    assert isinstance(payload["ranked_results"][0]["strengths"], list)
+    assert isinstance(payload["ranked_results"][0]["metadata"]["provider_name"], str)
+    assert isinstance(payload["ranked_results"][0]["provider_metadata"]["explanation_provider"]["provider_name"], str)
 
 
 def test_rank_fields_api_respects_field_filter_and_keeps_missing_soil_entries(client, db):

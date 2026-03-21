@@ -78,6 +78,19 @@ def make_economic_assessment(**kwargs):
     return EconomicAssessment(**values)
 
 
+def _normalized_explanation_payload(explanation) -> dict[str, object]:
+    payload = explanation.model_dump()
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict):
+        metadata.pop("generated_at", None)
+        debug_info = metadata.get("debug_info")
+        if isinstance(debug_info, dict):
+            risk_provider_metadata = debug_info.get("risk_provider_metadata")
+            if isinstance(risk_provider_metadata, dict):
+                risk_provider_metadata.pop("generated_at", None)
+    return payload
+
+
 def test_ranked_field_explanation_surfaces_positive_strengths():
     field_obj = make_field()
     crop = make_crop(
@@ -177,7 +190,7 @@ def test_ranked_and_suitability_adapters_produce_equivalent_explanations():
     from_ranked = build_ranked_field_explanation(ranked.ranked_fields[0])
     from_suitability = build_suitability_explanation(result, field_obj)
 
-    assert from_ranked.model_dump() == from_suitability.model_dump()
+    assert _normalized_explanation_payload(from_ranked) == _normalized_explanation_payload(from_suitability)
 
 
 def test_generate_explanation_returns_legacy_detailed_string():
