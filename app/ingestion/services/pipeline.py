@@ -96,11 +96,35 @@ class IngestionPipelineService:
 
             validated_records: list[NormalizedRecord] = []
             for payload in payloads:
-                transformed_records = self.transformer.transform(
-                    payload,
-                    data_source=data_source,
-                    ingestion_run=ingestion_run,
-                )
+                if payload.is_error:
+                    validation_skipped_records.append(
+                        self._build_payload_skip_record(
+                            payload=payload,
+                            stage="fetch",
+                            code="fetch_error",
+                            message=payload.error_message or "Payload fetch failed",
+                        )
+                    )
+                    records_skipped += 1
+                    continue
+
+                try:
+                    transformed_records = self.transformer.transform(
+                        payload,
+                        data_source=data_source,
+                        ingestion_run=ingestion_run,
+                    )
+                except Exception as exc:
+                    validation_skipped_records.append(
+                        self._build_payload_skip_record(
+                            payload=payload,
+                            stage="transformation",
+                            code="transformation_error",
+                            message=str(exc),
+                        )
+                    )
+                    records_skipped += 1
+                    continue
                 validation_result = validate_records(transformed_records, self.validators)
                 validated_records.extend(validation_result.valid_records)
                 validation_skipped_records.extend(validation_result.skipped_records)
@@ -117,13 +141,14 @@ class IngestionPipelineService:
             )
             records_inserted = persist_result.records_inserted
             records_skipped += persist_result.records_skipped
+            has_payload_stage_failures = bool(validation_skipped_records)
             has_validation_failures = bool(validation_issues)
             has_unexpected_writer_skips = (
                 persist_result.records_skipped > 0 and not persist_result.skipped_is_successful
             )
             final_status = (
                 IngestionRunStatus.PARTIAL
-                if has_validation_failures or has_unexpected_writer_skips
+                if has_payload_stage_failures or has_validation_failures or has_unexpected_writer_skips
                 else IngestionRunStatus.SUCCEEDED
             )
             run_metadata = self._build_run_metadata(
@@ -203,3 +228,23 @@ class IngestionPipelineService:
             "skip_reason_counts": dict(skip_reason_counts),
             **dict(writer_metadata or {}),
         }
+
+    @staticmethod
+    def _build_payload_skip_record(
+        *,
+        payload,
+        stage: str,
+        code: str,
+        message: str,
+    ) -> SkippedRecord:
+        return SkippedRecord(
+            source_identifier=payload.source_identifier,
+            record_type="raw_payload",
+            stage=stage,
+            reasons=(
+                ValidationIssue(
+                    code=code,
+                    message=message,
+                ),
+            ),
+        )

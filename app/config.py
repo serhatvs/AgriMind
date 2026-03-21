@@ -46,7 +46,10 @@ class Settings(BaseSettings):
     NASA_POWER_BASE_URL: str = "https://power.larc.nasa.gov/api/temporal/daily/point"
     NASA_POWER_COMMUNITY: str = "AG"
     NASA_POWER_TIMEOUT_SECONDS: float = 60.0
+    NASA_POWER_MAX_RETRIES: int = 2
+    NASA_POWER_RETRY_BACKOFF_SECONDS: float = 1.0
     NASA_POWER_DEFAULT_LOOKBACK_DAYS: int = 30
+    NASA_POWER_MAX_WINDOW_SHIFTS: int = 18
     NASA_POWER_TIME_STANDARD: str = "UTC"
     FAOSTAT_SOURCE_NAME: str = "FAOSTAT Crops and Livestock"
     FAOSTAT_API_BASE_URL: str = "https://faostatservices.fao.org/api/v1/en/data/QCL"
@@ -63,6 +66,7 @@ class Settings(BaseSettings):
     INGESTION_LOG_FORMAT: str = "json"
     INGESTION_ENABLED_SOURCES: str = ""
     INGESTION_DISABLED_SOURCES: str = ""
+    INGESTION_AUTO_CREATE_TABLES: bool = True
 
     _PROVIDER_SETTING_SPECS: ClassVar[dict[str, ProviderSettingSpec]] = {
         "yield": ProviderSettingSpec(
@@ -125,6 +129,33 @@ class Settings(BaseSettings):
 
         if value <= 0:
             raise ValueError("NASA_POWER_DEFAULT_LOOKBACK_DAYS must be greater than 0")
+        return value
+
+    @field_validator("NASA_POWER_MAX_RETRIES")
+    @classmethod
+    def validate_nasa_power_max_retries(cls, value: int) -> int:
+        """Ensure NASA POWER retry counts are non-negative."""
+
+        if value < 0:
+            raise ValueError("NASA_POWER_MAX_RETRIES must be greater than or equal to 0")
+        return value
+
+    @field_validator("NASA_POWER_RETRY_BACKOFF_SECONDS")
+    @classmethod
+    def validate_nasa_power_retry_backoff_seconds(cls, value: float) -> float:
+        """Ensure NASA POWER retry backoff is non-negative."""
+
+        if value < 0:
+            raise ValueError("NASA_POWER_RETRY_BACKOFF_SECONDS must be greater than or equal to 0")
+        return value
+
+    @field_validator("NASA_POWER_MAX_WINDOW_SHIFTS")
+    @classmethod
+    def validate_nasa_power_max_window_shifts(cls, value: int) -> int:
+        """Ensure the NASA POWER availability search window count is non-negative."""
+
+        if value < 0:
+            raise ValueError("NASA_POWER_MAX_WINDOW_SHIFTS must be greater than or equal to 0")
         return value
 
     @field_validator("FAOSTAT_DEFAULT_LOOKBACK_YEARS")

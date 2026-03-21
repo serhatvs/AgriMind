@@ -9,6 +9,7 @@ from sqlalchemy import MetaData, create_engine, inspect, text
 from app.ingestion.clients.base import IngestionClient
 from app.ingestion.runners.job_runner import IngestionJobRunner
 from app.ingestion.runners.registry import IngestionPipelineDefinition, IngestionPipelineRegistry
+from app.ingestion.services.repository import IngestionRepository
 from app.ingestion.services.pipeline import IngestionPipelineService
 from app.ingestion.transformers.json_records import JSONRecordTransformer
 from app.ingestion.types import NormalizedRecord, PersistResult, RawPayloadEnvelope
@@ -134,6 +135,25 @@ def test_ingestion_pipeline_service_persists_raw_payloads_and_finalizes_partial_
     assert raw_payloads[0].source_identifier == "batch-1"
     assert writer.records[0].source_identifier == "wx-1"
     assert writer.records[0].values["station_name"] == "North Station"
+
+
+def test_ingestion_repository_auto_creates_missing_ingestion_tables(db):
+    bind = db.get_bind()
+    assert bind is not None
+
+    RawIngestionPayload.__table__.drop(bind=bind, checkfirst=True)
+    IngestionRun.__table__.drop(bind=bind, checkfirst=True)
+    DataSource.__table__.drop(bind=bind, checkfirst=True)
+
+    repository = IngestionRepository(db)
+
+    repository.ensure_ingestion_tables_ready()
+
+    inspector = inspect(bind)
+    tables = set(inspector.get_table_names())
+    assert "data_sources" in tables
+    assert "ingestion_runs" in tables
+    assert "raw_ingestion_payloads" in tables
 
 
 def test_ingestion_pipeline_service_marks_run_failed_when_writer_raises(db):

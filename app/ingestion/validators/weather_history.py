@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import logging
 
 from app.ingestion.types import NormalizedRecord, ValidationIssue
@@ -23,19 +23,28 @@ class WeatherHistoryRecordValidator:
                 RequiredFieldsValidator(
                     "field_id",
                     "weather_date",
-                    "min_temp",
-                    "max_temp",
-                    "avg_temp",
-                    "rainfall_mm",
-                    "humidity",
-                    "wind_speed",
                 ),
                 FieldTypeValidator(("weather_date", "date"), date, field_label="weather_date"),
-                NumericRangeValidator("rainfall_mm", min_value=0),
-                NumericRangeValidator("humidity", min_value=0, max_value=100),
-                NumericRangeValidator("wind_speed", min_value=0),
-                NumericRangeValidator("solar_radiation", min_value=0, allow_none=True),
+                NumericRangeValidator("min_temp", min_value=-80, max_value=70, allow_none=True),
+                NumericRangeValidator("max_temp", min_value=-80, max_value=75, allow_none=True),
+                NumericRangeValidator("avg_temp", min_value=-80, max_value=75, allow_none=True),
+                NumericRangeValidator("rainfall_mm", min_value=0, max_value=1000, allow_none=True),
+                NumericRangeValidator("humidity", min_value=0, max_value=100, allow_none=True),
+                NumericRangeValidator("wind_speed", min_value=0, max_value=200, allow_none=True),
+                NumericRangeValidator("solar_radiation", min_value=0, max_value=100, allow_none=True),
                 NumericRangeValidator("et0", min_value=0, allow_none=True),
+                PredicateValidator(
+                    self._weather_date_is_reasonable,
+                    code="invalid_weather_date",
+                    message="weather_date must be within a sane historical range",
+                    field_name="weather_date",
+                ),
+                PredicateValidator(
+                    self._has_any_observation_metric,
+                    code="missing_weather_observation",
+                    message="At least one weather metric must be present",
+                    field_name="weather_date",
+                ),
                 PredicateValidator(
                     self._temperatures_are_ordered,
                     code="invalid_temperature_order",
@@ -67,3 +76,24 @@ class WeatherHistoryRecordValidator:
         if not all(isinstance(value, (int, float)) for value in (min_temp, avg_temp, max_temp)):
             return True
         return float(min_temp) <= float(avg_temp) <= float(max_temp)
+
+    @staticmethod
+    def _weather_date_is_reasonable(record: NormalizedRecord) -> bool:
+        weather_date = record.values.get("weather_date")
+        if not isinstance(weather_date, date):
+            return True
+        return date(1980, 1, 1) <= weather_date <= (date.today() + timedelta(days=1))
+
+    @staticmethod
+    def _has_any_observation_metric(record: NormalizedRecord) -> bool:
+        metric_names = (
+            "min_temp",
+            "max_temp",
+            "avg_temp",
+            "rainfall_mm",
+            "humidity",
+            "wind_speed",
+            "solar_radiation",
+            "et0",
+        )
+        return any(record.values.get(metric_name) is not None for metric_name in metric_names)

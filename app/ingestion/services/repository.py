@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.reflection import tables_exist
 from app.ingestion.types import RawPayloadEnvelope
 from app.models.enums import DataSourceType, IngestionPayloadType, IngestionRunStatus, IngestionRunType
 from app.models.ingestion import DataSource, IngestionRun, RawIngestionPayload
 from app.models.mixins import utc_now
 from app.services.errors import NotFoundError, ServiceValidationError
+
+
+logger = logging.getLogger(__name__)
 
 
 class IngestionRepository:
@@ -28,10 +33,27 @@ class IngestionRepository:
         """Fail fast when the ingestion infrastructure tables are unavailable."""
 
         if not tables_exist(self.db, *self.REQUIRED_TABLES):
+            if settings.INGESTION_AUTO_CREATE_TABLES:
+                self._create_ingestion_tables()
+            if not tables_exist(self.db, *self.REQUIRED_TABLES):
+                required = ", ".join(self.REQUIRED_TABLES)
+                raise ServiceValidationError(
+                    f"Ingestion tables are missing ({required}). Run 'alembic upgrade head' before starting ingestion."
+                )
+
+    def _create_ingestion_tables(self) -> None:
+        """Create only the ingestion infrastructure tables when they are missing."""
+
+        bind = self.db.get_bind()
+        if bind is None:
             required = ", ".join(self.REQUIRED_TABLES)
             raise ServiceValidationError(
                 f"Ingestion tables are missing ({required}). Run 'alembic upgrade head' before starting ingestion."
             )
+        logger.warning("Creating missing ingestion infrastructure tables automatically")
+        DataSource.__table__.create(bind=bind, checkfirst=True)
+        IngestionRun.__table__.create(bind=bind, checkfirst=True)
+        RawIngestionPayload.__table__.create(bind=bind, checkfirst=True)
 
     def get_required_data_source(self, data_source_id: UUID) -> DataSource:
         """Return a data source by id or raise a service-level not-found error."""

@@ -6,7 +6,7 @@ from uuid import uuid4
 import httpx
 
 from app.config import settings
-from app.ingestion.clients.nasa_power import NASAPowerAPIClient
+from app.ingestion.clients.nasa_power import NASAPowerAPIClient, NASAPowerFetchResult
 from app.ingestion.runners.run_nasa_power import execute_nasa_power_ingestion
 from app.ingestion.services.weather_history_writer import WeatherHistoryIngestionWriter
 from app.ingestion.transformers.nasa_power_weather import NASAPowerWeatherTransformer
@@ -23,8 +23,9 @@ from app.models.weather_history import WeatherHistory
 
 
 class _StaticNASAAPIClient:
-    def __init__(self, payload: dict[str, object]) -> None:
-        self.payload = payload
+    def __init__(self, payloads: list[dict[str, object]] | dict[str, object], *, error_on_calls: set[int] | None = None) -> None:
+        self.payloads = payloads if isinstance(payloads, list) else [payloads]
+        self.error_on_calls = error_on_calls or set()
         self.calls: list[dict[str, object]] = []
 
     def fetch_daily_weather(
@@ -35,7 +36,8 @@ class _StaticNASAAPIClient:
         start_date: date,
         end_date: date,
         base_url: str | None = None,
-    ) -> dict[str, object]:
+    ) -> NASAPowerFetchResult:
+        call_index = len(self.calls)
         self.calls.append(
             {
                 "latitude": latitude,
@@ -45,7 +47,16 @@ class _StaticNASAAPIClient:
                 "base_url": base_url,
             }
         )
-        return self.payload
+        if call_index in self.error_on_calls:
+            raise RuntimeError(f"fetch failed for call {call_index}")
+
+        payload = self.payloads[min(call_index, len(self.payloads) - 1)]
+        parameter_names = tuple(payload["properties"]["parameter"].keys())
+        return NASAPowerFetchResult(
+            payload=payload,
+            parameter_names=parameter_names,
+            attempted_parameter_sets=(parameter_names,),
+        )
 
 
 def _build_nasa_payload() -> dict[str, object]:
@@ -55,10 +66,26 @@ def _build_nasa_payload() -> dict[str, object]:
                 "T2M_MIN": {"20250101": 10.0, "20250102": 11.0},
                 "T2M_MAX": {"20250101": 20.0, "20250102": 21.0},
                 "T2M": {"20250101": 15.0, "20250102": 16.0},
-                "PRECTOT": {"20250101": 3.2, "20250102": 0.0},
+                "PRECTOTCORR": {"20250101": 3.2, "20250102": 0.0},
                 "RH2M": {"20250101": 71.0, "20250102": 69.0},
                 "WS2M": {"20250101": 4.6, "20250102": 5.1},
                 "ALLSKY_SFC_SW_DWN": {"20250101": 12.3, "20250102": -999.0},
+            }
+        }
+    }
+
+
+def _build_empty_nasa_payload() -> dict[str, object]:
+    return {
+        "properties": {
+            "parameter": {
+                "T2M_MIN": {"20260320": -999.0, "20260321": -999.0},
+                "T2M_MAX": {"20260320": -999.0, "20260321": -999.0},
+                "T2M": {"20260320": -999.0, "20260321": -999.0},
+                "PRECTOTCORR": {"20260320": -999.0, "20260321": -999.0},
+                "RH2M": {"20260320": -999.0, "20260321": -999.0},
+                "WS2M": {"20260320": -999.0, "20260321": -999.0},
+                "ALLSKY_SFC_SW_DWN": {"20260320": -999.0, "20260321": -999.0},
             }
         }
     }
@@ -104,19 +131,54 @@ def test_nasa_power_api_client_fetches_daily_weather_with_expected_query():
 
     client = NASAPowerAPIClient(transport=httpx.MockTransport(handler))
 
-    payload = client.fetch_daily_weather(
+    result = client.fetch_daily_weather(
         latitude=39.7817,
         longitude=-89.6501,
         start_date=date(2025, 1, 1),
         end_date=date(2025, 1, 2),
     )
 
-    assert payload["properties"]["parameter"]["T2M"]["20250101"] == 15.0
+    assert result.payload["properties"]["parameter"]["T2M"]["20250101"] == 15.0
+    assert result.parameter_names == (
+        "T2M",
+        "T2M_MIN",
+        "T2M_MAX",
+        "PRECTOTCORR",
+        "RH2M",
+        "WS2M",
+        "ALLSKY_SFC_SW_DWN",
+    )
     assert captured["params"]["start"] == "20250101"
     assert captured["params"]["end"] == "20250102"
     assert captured["params"]["community"] == settings.NASA_POWER_COMMUNITY
     assert captured["params"]["time-standard"] == settings.NASA_POWER_TIME_STANDARD
-    assert captured["params"]["parameters"] == "T2M_MIN,T2M_MAX,T2M,PRECTOT,WS2M,RH2M,ALLSKY_SFC_SW_DWN"
+    assert captured["params"]["parameters"] == "T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,RH2M,WS2M,ALLSKY_SFC_SW_DWN"
+
+
+def test_nasa_power_api_client_falls_back_when_primary_parameter_set_is_rejected():
+    request_params: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        request_params.append(str(request.url.params["parameters"]))
+        if "PRECTOTCORR" in str(request.url.params["parameters"]):
+            return httpx.Response(422, json={"detail": "parameter PRECTOTCORR is not supported"})
+        payload = _build_nasa_payload()
+        payload["properties"]["parameter"]["PRECTOT"] = {"20250101": 3.2, "20250102": 0.0}
+        return httpx.Response(200, json=payload)
+
+    client = NASAPowerAPIClient(transport=httpx.MockTransport(handler))
+
+    result = client.fetch_daily_weather(
+        latitude=39.7817,
+        longitude=-89.6501,
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 1, 2),
+    )
+
+    assert len(request_params) == 2
+    assert request_params[0] == "T2M,T2M_MIN,T2M_MAX,PRECTOTCORR,RH2M,WS2M,ALLSKY_SFC_SW_DWN"
+    assert request_params[1] == "T2M,T2M_MIN,T2M_MAX,PRECTOT,RH2M,WS2M,ALLSKY_SFC_SW_DWN"
+    assert result.parameter_names[3] == "PRECTOT"
 
 
 def test_nasa_power_weather_transformer_maps_daily_rows():
@@ -147,6 +209,31 @@ def test_nasa_power_weather_transformer_maps_daily_rows():
     assert records[0].values["rainfall_mm"] == 3.2
     assert records[1].values["solar_radiation"] is None
     assert "et0" not in records[1].values
+
+
+def test_nasa_power_weather_transformer_omits_all_missing_days():
+    transformer = NASAPowerWeatherTransformer()
+    data_source, ingestion_run = _build_runtime_records()
+
+    records = transformer.transform(
+        RawPayloadEnvelope(
+            payload_type=IngestionPayloadType.JSON,
+            source_identifier="field-1:2026-03-20:2026-03-21",
+            raw_json={
+                "field": {
+                    "id": "field-1",
+                    "name": "North Block",
+                    "latitude": 39.7817,
+                    "longitude": -89.6501,
+                },
+                "response": _build_empty_nasa_payload(),
+            },
+        ),
+        data_source=data_source,
+        ingestion_run=ingestion_run,
+    )
+
+    assert records == []
 
 
 def test_weather_history_writer_skips_existing_and_in_batch_duplicates(db):
@@ -283,3 +370,57 @@ def test_execute_nasa_power_ingestion_persists_run_payloads_and_weather_rows(db)
     assert db.query(IngestionRun).count() == 2
     assert db.query(RawIngestionPayload).count() == 2
     assert db.query(WeatherHistory).count() == 2
+
+
+def test_execute_nasa_power_ingestion_skips_failed_field_fetches_without_failing_run(db):
+    primary_field = _build_field("North Block")
+    secondary_field = _build_field("South Block")
+    secondary_field.latitude = 40.5
+    secondary_field.longitude = -90.1
+    db.add_all([primary_field, secondary_field])
+    db.commit()
+
+    api_client = _StaticNASAAPIClient(_build_nasa_payload(), error_on_calls={1})
+
+    result = execute_nasa_power_ingestion(
+        db,
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 1, 2),
+        run_type=IngestionRunType.BACKFILL,
+        api_client=api_client,
+    )
+
+    raw_payloads = db.query(RawIngestionPayload).order_by(RawIngestionPayload.id.asc()).all()
+
+    assert result.status == IngestionRunStatus.PARTIAL
+    assert result.records_fetched == 2
+    assert result.records_inserted == 2
+    assert result.records_skipped == 1
+    assert len(raw_payloads) == 2
+    assert "fetch_error" in raw_payloads[1].raw_json
+
+
+def test_nasa_power_ingestion_client_shifts_default_window_when_recent_data_is_empty():
+    api_client = _StaticNASAAPIClient([_build_empty_nasa_payload(), _build_nasa_payload()])
+    from app.ingestion.clients.nasa_power import NASAPowerIngestionClient
+    from app.ingestion.services.field_targets import FieldCoordinateTarget
+
+    client = NASAPowerIngestionClient(
+        api_client=api_client,
+        field_targets=[
+            FieldCoordinateTarget(
+                field_id="field-1",
+                field_name="North Block",
+                latitude=39.7817,
+                longitude=-89.6501,
+            )
+        ],
+        end_date=date(2026, 3, 21),
+        default_lookback_days=2,
+        max_window_shifts=10,
+    )
+
+    resolved_start_date, resolved_end_date = client.resolve_date_range()
+
+    assert resolved_end_date < date(2026, 3, 21)
+    assert (resolved_end_date - resolved_start_date).days == 1

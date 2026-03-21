@@ -20,6 +20,8 @@ class RawPayloadEnvelope:
     payload_type: IngestionPayloadType | str
     source_identifier: str
     raw_json: JSONValue
+    is_error: bool = False
+    error_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

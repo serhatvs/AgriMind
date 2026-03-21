@@ -21,13 +21,23 @@ class NASAPowerWeatherTransformer(PayloadTransformer):
     """Transform a NASA POWER response into daily weather_history-style rows."""
 
     PARAMETER_TO_FIELD_MAP = {
-        "T2M_MIN": "min_temp",
-        "T2M_MAX": "max_temp",
-        "T2M": "avg_temp",
-        "PRECTOT": "rainfall_mm",
-        "RH2M": "humidity",
-        "WS2M": "wind_speed",
-        "ALLSKY_SFC_SW_DWN": "solar_radiation",
+        "T2M_MIN": ("min_temp",),
+        "T2M_MAX": ("max_temp",),
+        "T2M": ("avg_temp",),
+        "PRECTOTCORR": ("rainfall_mm",),
+        "PRECTOT": ("rainfall_mm",),
+        "RH2M": ("humidity",),
+        "WS2M": ("wind_speed",),
+        "ALLSKY_SFC_SW_DWN": ("solar_radiation",),
+    }
+    FIELD_PARAMETER_PRIORITY = {
+        "min_temp": ("T2M_MIN",),
+        "max_temp": ("T2M_MAX",),
+        "avg_temp": ("T2M",),
+        "rainfall_mm": ("PRECTOTCORR", "PRECTOT"),
+        "humidity": ("RH2M",),
+        "wind_speed": ("WS2M",),
+        "solar_radiation": ("ALLSKY_SFC_SW_DWN",),
     }
     MISSING_SENTINELS = {None, "", -999, -999.0, -99, -99.0, "-999", "-99"}
 
@@ -42,6 +52,10 @@ class NASAPowerWeatherTransformer(PayloadTransformer):
 
         _ = (data_source, ingestion_run)
         raw_json = self._require_mapping(payload.raw_json, "payload.raw_json")
+        fetch_error = raw_json.get("fetch_error")
+        if isinstance(fetch_error, Mapping):
+            error_message = str(fetch_error.get("message") or "NASA POWER fetch failed")
+            raise ServiceValidationError(error_message)
         field_metadata = self._require_mapping(raw_json.get("field"), "payload.raw_json.field")
         response_payload = self._require_mapping(raw_json.get("response"), "payload.raw_json.response")
         parameter_payload = self._require_mapping(
@@ -56,7 +70,8 @@ class NASAPowerWeatherTransformer(PayloadTransformer):
         date_keys = sorted(
             {
                 date_key
-                for parameter_name in self.PARAMETER_TO_FIELD_MAP
+                for parameter_names in self.FIELD_PARAMETER_PRIORITY.values()
+                for parameter_name in parameter_names
                 for date_key in self._parameter_series(parameter_payload, parameter_name).keys()
             }
         )
@@ -70,10 +85,19 @@ class NASAPowerWeatherTransformer(PayloadTransformer):
                 "field_id": str(field_id),
                 "weather_date": weather_date,
             }
-            for parameter_name, field_name in self.PARAMETER_TO_FIELD_MAP.items():
-                values[field_name] = self._normalize_parameter_value(
-                    self._parameter_series(parameter_payload, parameter_name).get(date_key)
+            for field_name, parameter_names in self.FIELD_PARAMETER_PRIORITY.items():
+                values[field_name] = self._resolve_field_value(
+                    parameter_payload=parameter_payload,
+                    parameter_names=parameter_names,
+                    date_key=date_key,
                 )
+            if not self._has_any_observation_metric(values):
+                logger.info(
+                    "Skipping NASA POWER date '%s' from payload '%s' because every mapped metric is missing",
+                    weather_date.isoformat(),
+                    payload.source_identifier,
+                )
+                continue
             records.append(
                 NormalizedRecord(
                     record_type="weather_history",
@@ -100,6 +124,21 @@ class NASAPowerWeatherTransformer(PayloadTransformer):
             return {}
         return series
 
+    def _resolve_field_value(
+        self,
+        *,
+        parameter_payload: Mapping[str, Any],
+        parameter_names: Sequence[str],
+        date_key: str,
+    ) -> float | None:
+        for parameter_name in parameter_names:
+            value = self._normalize_parameter_value(
+                self._parameter_series(parameter_payload, parameter_name).get(date_key)
+            )
+            if value is not None:
+                return value
+        return None
+
     def _normalize_parameter_value(self, value: Any) -> float | None:
         if value in self.MISSING_SENTINELS:
             return None
@@ -107,6 +146,19 @@ class NASAPowerWeatherTransformer(PayloadTransformer):
         if math.isnan(numeric_value):
             return None
         return numeric_value
+
+    @staticmethod
+    def _has_any_observation_metric(values: Mapping[str, Any]) -> bool:
+        metric_names = (
+            "min_temp",
+            "max_temp",
+            "avg_temp",
+            "rainfall_mm",
+            "humidity",
+            "wind_speed",
+            "solar_radiation",
+        )
+        return any(values.get(metric_name) is not None for metric_name in metric_names)
 
     @staticmethod
     def _parse_weather_date(date_key: str, source_identifier: str) -> date | None:

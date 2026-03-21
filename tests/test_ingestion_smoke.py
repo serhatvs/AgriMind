@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import select
 
 from app.db.reflection import reflect_tables
+from app.ingestion.clients.nasa_power import NASAPowerFetchResult
 from app.ingestion.runners.run_faostat import execute_faostat_ingestion
 from app.ingestion.runners.run_nasa_power import execute_nasa_power_ingestion
 from app.ingestion.services.pipeline import IngestionPipelineService
@@ -54,7 +55,7 @@ class _StaticNASAAPIClient:
         start_date: date,
         end_date: date,
         base_url: str | None = None,
-    ) -> dict[str, object]:
+    ) -> NASAPowerFetchResult:
         self.calls.append(
             {
                 "latitude": latitude,
@@ -64,7 +65,12 @@ class _StaticNASAAPIClient:
                 "base_url": base_url,
             }
         )
-        return self.payload
+        parameter_names = tuple(self.payload["properties"]["parameter"].keys())
+        return NASAPowerFetchResult(
+            payload=self.payload,
+            parameter_names=parameter_names,
+            attempted_parameter_sets=(parameter_names,),
+        )
 
 
 class _StaticFAOSTATClient:
@@ -136,7 +142,7 @@ def _build_nasa_payload(
                 "T2M_MIN": select_dates({"20250101": 10.0, "20250102": 11.0, "20250103": 12.0}),
                 "T2M_MAX": select_dates({"20250101": 20.0, "20250102": 21.0, "20250103": 22.0}),
                 "T2M": select_dates({"20250101": 15.0, "20250102": 16.0, "20250103": 17.0}),
-                "PRECTOT": select_dates({"20250101": 3.2, "20250102": 0.0, "20250103": 1.4}),
+                "PRECTOTCORR": select_dates({"20250101": 3.2, "20250102": 0.0, "20250103": 1.4}),
                 "RH2M": humidity_series,
                 "WS2M": select_dates({"20250101": 4.6, "20250102": 5.1, "20250103": 4.9}),
                 "ALLSKY_SFC_SW_DWN": select_dates({"20250101": 12.3, "20250102": 11.1, "20250103": 12.8}),
